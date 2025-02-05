@@ -12,8 +12,8 @@ rust-version = "1.81"
 
 [dependencies]
 anyhow = "1.0.95"
-iroh = "0.31.0"
-iroh-blobs = "0.31.0"
+iroh = "0.32.0"
+iroh-blobs = "0.32.0"
 n0-future = "0.1.2"
 serde = { version = "1.0.217", features = ["derive"] }
 tokio-serde = { version = "0.9.0", features = ["bincode"] }
