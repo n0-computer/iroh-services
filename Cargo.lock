@@ -3280,7 +3280,7 @@ dependencies = [
 [[package]]
 name = "rcan"
 version = "0.1.0"
-source = "git+https://github.com/dignifiedquire/rcan?branch=main#e0b5748eda17f8e8f236c82ab079bed013cbbc68"
+source = "git+https://github.com/dignifiedquire/rcan?branch=main#fea48cf8290a8e6d77518bb1cd4b2c89388afa1f"
 dependencies = [
  "anyhow",
  "blake3",
