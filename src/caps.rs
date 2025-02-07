@@ -29,7 +29,7 @@ impl Capability for IpsCap {
 /// Create an rcan token for the api access.
 pub fn create_api_token(
     user_ssh_key: &SshPrivateKey,
-    node_id: NodeId,
+    local_node_id: NodeId,
     max_age: Duration,
 ) -> Result<Rcan<IpsCap>> {
     let issuer: SigningKey = user_ssh_key
@@ -41,7 +41,7 @@ pub fn create_api_token(
         .into();
 
     // TODO: add Into to iroh-base
-    let audience = VerifyingKey::from_bytes(node_id.as_bytes())?;
+    let audience = VerifyingKey::from_bytes(local_node_id.as_bytes())?;
     let can =
         Rcan::issuing_builder(&issuer, audience, IpsCap::Api).sign(Expires::valid_for(max_age));
     Ok(can)

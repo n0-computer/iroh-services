@@ -37,18 +37,18 @@ pub struct Client {
 /// Constructs an IPS client
 pub struct ClientBuilder {
     cap: Option<Rcan<IpsCap>>,
-    remote: NodeAddr,
     cap_expiry: Duration,
+    endpoint: Endpoint,
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
 
 impl ClientBuilder {
-    pub fn new<A: Into<NodeAddr>>(remote: A) -> Self {
+    pub fn new(endpoint: &Endpoint) -> Self {
         Self {
             cap: None,
-            remote: remote.into(),
             cap_expiry: DEFAULT_CAP_EXPIRY,
+            endpoint: endpoint.clone(),
         }
     }
 
@@ -62,7 +62,8 @@ impl ClientBuilder {
 
     /// Creates the capability from the provided private ssh key.
     pub fn ssh_key(mut self, key: &ssh_key::PrivateKey) -> Result<Self> {
-        let cap = crate::caps::create_api_token(key, self.remote.node_id, self.cap_expiry)?;
+        let local_node = self.endpoint.node_id();
+        let cap = crate::caps::create_api_token(key, local_node, self.cap_expiry)?;
         self.cap.replace(cap);
 
         Ok(self)
@@ -72,7 +73,7 @@ impl ClientBuilder {
     pub fn capability(mut self, cap: Rcan<IpsCap>) -> Result<Self> {
         ensure!(cap.capability() == &IpsCap::Api, "invalid capability");
         ensure!(
-            NodeId::from(*cap.audience()) == self.remote.node_id,
+            NodeId::from(*cap.audience()) == self.endpoint.node_id(),
             "invalid audience"
         );
 
@@ -81,11 +82,11 @@ impl ClientBuilder {
     }
 
     /// Create a new client, connected to the provide service node
-    pub async fn build(self, endpoint: &Endpoint) -> Result<Client> {
+    pub async fn build(self, remote: impl Into<NodeAddr>) -> Result<Client> {
         let cap = self.cap.context("missing capability")?;
 
-        let remote_addr = self.remote;
-        let connection = endpoint.connect(remote_addr.clone(), ALPN).await?;
+        let remote_addr = remote.into();
+        let connection = self.endpoint.connect(remote_addr.clone(), ALPN).await?;
 
         let (send_stream, recv_stream) = connection.open_bi().await?;
 
@@ -105,7 +106,7 @@ impl ClientBuilder {
         );
 
         let mut this = Client {
-            _endpoint: endpoint.clone(),
+            _endpoint: self.endpoint,
             writer,
             reader,
             cap,
@@ -118,8 +119,8 @@ impl ClientBuilder {
 }
 
 impl Client {
-    pub fn builder<A: Into<NodeAddr>>(remote: A) -> ClientBuilder {
-        ClientBuilder::new(remote)
+    pub fn builder(endpoint: &Endpoint) -> ClientBuilder {
+        ClientBuilder::new(endpoint)
     }
 
     /// Trigger the auth handshake with the server
