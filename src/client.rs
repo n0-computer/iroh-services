@@ -12,7 +12,7 @@ use tokio_serde::formats::Bincode;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 use crate::{
-    caps::IpsCap,
+    caps::{IpsCap, IpsCapV1},
     protocol::{ClientMessage, ServerMessage, ALPN},
 };
 
@@ -71,7 +71,10 @@ impl ClientBuilder {
 
     /// Sets the capability.
     pub fn capability(mut self, cap: Rcan<IpsCap>) -> Result<Self> {
-        ensure!(cap.capability() == &IpsCap::Api, "invalid capability");
+        ensure!(
+            cap.capability() == &IpsCap::V1(IpsCapV1::Api),
+            "invalid capability"
+        );
         ensure!(
             NodeId::from(*cap.audience()) == self.endpoint.node_id(),
             "invalid audience"

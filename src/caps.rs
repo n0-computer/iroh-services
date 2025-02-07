@@ -7,10 +7,15 @@ use rcan::{Capability, Expires, Rcan};
 use serde::{Deserialize, Serialize};
 use ssh_key::PrivateKey as SshPrivateKey;
 
+#[derive(Ord, Eq, PartialOrd, PartialEq, Clone, Serialize, Deserialize, Debug)]
+pub enum IpsCap {
+    V1(IpsCapV1),
+}
+
 /// Potential capabilities for IPS
 #[derive(Ord, Eq, PartialOrd, PartialEq, Clone, Serialize, Deserialize, Debug)]
 #[repr(u8)]
-pub enum IpsCap {
+pub enum IpsCapV1 {
     /// API tokens, used in the RPC
     Api,
     /// Used to authenticate users.
@@ -20,8 +25,9 @@ pub enum IpsCap {
 impl Capability for IpsCap {
     fn can_delegate(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Web, _) => false, // web can never delegate
-            (Self::Api, _) => false,
+            (Self::V1(IpsCapV1::Web), Self::V1(IpsCapV1::Web)) => true,
+            (Self::V1(IpsCapV1::Api), Self::V1(IpsCapV1::Api)) => true,
+            (Self::V1(_), Self::V1(_)) => false,
         }
     }
 }
@@ -42,7 +48,7 @@ pub fn create_api_token(
 
     // TODO: add Into to iroh-base
     let audience = VerifyingKey::from_bytes(local_node_id.as_bytes())?;
-    let can =
-        Rcan::issuing_builder(&issuer, audience, IpsCap::Api).sign(Expires::valid_for(max_age));
+    let can = Rcan::issuing_builder(&issuer, audience, IpsCap::V1(IpsCapV1::Api))
+        .sign(Expires::valid_for(max_age));
     Ok(can)
 }
