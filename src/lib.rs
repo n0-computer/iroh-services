@@ -1,7 +1,9 @@
 mod client;
 mod protocol;
 
+pub mod caps;
+
 pub use self::{
-    client::Client,
+    client::{Client, ClientBuilder},
     protocol::{ClientMessage, ServerMessage, ALPN},
 };
