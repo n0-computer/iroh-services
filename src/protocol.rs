@@ -13,6 +13,8 @@ pub enum ServerMessage {
     Auth(Rcan<IpsCap>),
     /// Request that the node fetches the given blob.
     PutBlob { ticket: BlobTicket, name: String },
+    /// Request to store the given metrics data
+    PutMetrics { encoded: String },
 }
 
 /// Messages sent from the server to the client
