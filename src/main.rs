@@ -5,6 +5,7 @@ use iroh::protocol::Router;
 use iroh::{Endpoint, NodeAddr, NodeId};
 use iroh_blobs::BlobFormat;
 use iroh_services::Client;
+use rand::Rng;
 use ssh_key::Algorithm;
 use tracing::debug;
 
@@ -28,31 +29,48 @@ pub async fn main() -> Result<()> {
     debug!("local node: {}", client_node_id,);
 
     let remote_node_id: NodeId = std::env::args().nth(1).unwrap().parse()?;
-    let node_addr: NodeAddr = remote_node_id.into();
+    let remote_node_addr: NodeAddr = remote_node_id.into();
 
     println!("press ctrl+c once your sshkey is registerd");
     tokio::signal::ctrl_c().await?;
 
     // Create iroh services client
     let mut rpc_client = Client::builder(client_router.endpoint())
-        .metrics_interval(Duration::from_secs(2))
+        // .metrics_interval(Duration::from_secs(2))
         .ssh_key(&alice_ssh_key)?
-        .build(node_addr.clone())
+        .build(remote_node_addr.clone())
         .await?;
 
     // add blob on the client
-    let client_blob = client_blobs.client().add_bytes("hello world").await?;
+    let num: u64 = rng.gen();
+    let client_blob = client_blobs
+        .client()
+        .add_bytes(format!("hello world-{num}"))
+        .await?;
 
     // upload the blob
+    println!("uploading blob...");
     let client_addr = client_router.endpoint().node_addr().await?;
     rpc_client
         .put_blob(
-            client_addr,
+            client_addr.clone(),
             client_blob.hash,
             BlobFormat::Raw,
-            "my-blob.txt".into(),
+            format!("my-blob-{num}.txt").into(),
         )
         .await?;
+
+    println!("waiting for Ctrl+C to download..");
+    tokio::signal::ctrl_c().await?;
+
+    client_blobs.client().delete_blob(client_blob.hash).await?;
+    let blob = client_blobs
+        .client()
+        .download(client_blob.hash, remote_node_addr)
+        .await?
+        .await?;
+
+    println!("downloaded blob: {:?}", blob);
 
     println!("waiting for Ctrl+C..");
     tokio::signal::ctrl_c().await?;
