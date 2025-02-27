@@ -6,10 +6,12 @@ use iroh::{
     Endpoint, NodeAddr, NodeId,
 };
 use iroh_blobs::{ticket::BlobTicket, BlobFormat, Hash};
-use n0_future::{SinkExt, StreamExt};
+use n0_future::{task::AbortOnDropHandle, SinkExt, StreamExt};
 use rcan::Rcan;
+use tokio::sync::{mpsc, oneshot};
 use tokio_serde::formats::Bincode;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tracing::{debug, warn};
 
 use crate::{
     caps::{IpsCap, IpsCapV1},
@@ -18,19 +20,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Client {
-    _endpoint: Endpoint,
-    reader: tokio_serde::Framed<
-        FramedRead<RecvStream, LengthDelimitedCodec>,
-        ClientMessage,
-        ServerMessage,
-        Bincode<ClientMessage, ServerMessage>,
-    >,
-    writer: tokio_serde::Framed<
-        FramedWrite<SendStream, LengthDelimitedCodec>,
-        ClientMessage,
-        ServerMessage,
-        Bincode<ClientMessage, ServerMessage>,
-    >,
+    sender: mpsc::Sender<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
+    _actor_task: AbortOnDropHandle<()>,
     cap: Rcan<IpsCap>,
 }
 
@@ -39,6 +30,7 @@ pub struct ClientBuilder {
     cap: Option<Rcan<IpsCap>>,
     cap_expiry: Duration,
     endpoint: Endpoint,
+    enable_metrics: Option<Duration>,
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
@@ -49,7 +41,22 @@ impl ClientBuilder {
             cap: None,
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
+            enable_metrics: Some(Duration::from_secs(60)),
         }
+    }
+
+    /// Set the metrics collection interval
+    ///
+    /// Defaults to enabled, every 60 seconds.
+    pub fn metrics_interval(mut self, interval: Duration) -> Self {
+        self.enable_metrics = Some(interval);
+        self
+    }
+
+    /// Disbale metrics collection.
+    pub fn disable_metrics(mut self) -> Self {
+        self.enable_metrics = None;
+        self
     }
 
     /// Loads the private ssh key from the given path, and creates the needed capability.
@@ -108,11 +115,26 @@ impl ClientBuilder {
             Bincode::<ClientMessage, ServerMessage>::default(),
         );
 
-        let mut this = Client {
+        let (internal_sender, internal_receiver) = mpsc::channel(64);
+
+        let actor = Actor {
             _endpoint: self.endpoint,
-            writer,
             reader,
+            writer,
+            cap: cap.clone(),
+            internal_receiver,
+            internal_sender: internal_sender.clone(),
+        };
+        let enable_metrics = self.enable_metrics;
+        let run_handle = tokio::task::spawn(async move {
+            actor.run(enable_metrics).await;
+        });
+        let actor_task = AbortOnDropHandle::new(run_handle);
+
+        let mut this = Client {
             cap,
+            sender: internal_sender,
+            _actor_task: actor_task,
         };
 
         this.authenticate().await?;
@@ -128,25 +150,12 @@ impl Client {
 
     /// Trigger the auth handshake with the server
     async fn authenticate(&mut self) -> Result<()> {
-        self.writer
-            .send(ServerMessage::Auth(self.cap.clone()))
+        let (s, r) = oneshot::channel();
+        self.sender
+            .send((ServerMessage::Auth(self.cap.clone()), s))
             .await?;
-
-        match self.reader.next().await {
-            Some(Ok(msg)) => match msg {
-                ClientMessage::AuthResponse(None) => Ok(()),
-                ClientMessage::AuthResponse(Some(err)) => {
-                    bail!("failed to authenticate: {}", err);
-                }
-                _ => {
-                    bail!("unexpected message from server: {:?}", msg);
-                }
-            },
-            Some(Err(err)) => {
-                bail!("auth: failed to receive response: {:?}", err);
-            }
-            None => bail!("auth: connection closed"),
-        }
+        r.await??;
+        Ok(())
     }
 
     /// Transfer the blob from the local iroh node to the service node.
@@ -159,23 +168,138 @@ impl Client {
     ) -> Result<()> {
         let ticket = BlobTicket::new(node.into(), hash, format)?;
 
-        self.writer
-            .send(ServerMessage::PutBlob { ticket, name })
+        let (s, r) = oneshot::channel();
+        self.sender
+            .send((ServerMessage::PutBlob { ticket, name }, s))
             .await?;
-        match self.reader.next().await {
-            Some(Ok(msg)) => match msg {
-                ClientMessage::PutBlobResponse(None) => Ok(()),
-                ClientMessage::PutBlobResponse(Some(err)) => {
-                    bail!("upload failed: {}", err);
+        r.await??;
+        Ok(())
+    }
+}
+
+struct Actor {
+    _endpoint: Endpoint,
+    reader: tokio_serde::Framed<
+        FramedRead<RecvStream, LengthDelimitedCodec>,
+        ClientMessage,
+        ServerMessage,
+        Bincode<ClientMessage, ServerMessage>,
+    >,
+    writer: tokio_serde::Framed<
+        FramedWrite<SendStream, LengthDelimitedCodec>,
+        ClientMessage,
+        ServerMessage,
+        Bincode<ClientMessage, ServerMessage>,
+    >,
+    cap: Rcan<IpsCap>,
+    internal_receiver: mpsc::Receiver<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
+    internal_sender: mpsc::Sender<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
+}
+
+impl Actor {
+    async fn run(mut self, enable_metrics: Option<Duration>) {
+        if enable_metrics.is_some() {
+            iroh_metrics::core::Core::init(|reg, metrics| {
+                use iroh::metrics::*;
+                use iroh_metrics::core::Metric;
+
+                metrics.insert(RelayMetrics::new(reg));
+                metrics.insert(NetReportMetrics::new(reg));
+                metrics.insert(PortmapMetrics::new(reg));
+                metrics.insert(MagicsockMetrics::new(reg));
+            });
+        }
+        let metrics_time = enable_metrics.unwrap_or_else(|| Duration::from_secs(60 * 60 * 24));
+        let mut metrics_timer = tokio::time::interval(metrics_time);
+
+        loop {
+            tokio::select! {
+                biased;
+                msg = self.internal_receiver.recv() => {
+                    match msg {
+                        Some((server_msg, response)) => {
+                            let res = self.handle_message(server_msg).await;
+                            response.send(res).ok();
+                        }
+                        None => {
+                            debug!("shutting down");
+                            break;
+                        }
+                    }
                 }
-                _ => {
-                    bail!("unexpected message from server: {:?}", msg);
+                _ = metrics_timer.tick(), if enable_metrics.is_some() => {
+                    self.send_metrics().await;
                 }
-            },
-            Some(Err(err)) => {
-                bail!("failed to receive response: {:?}", err);
             }
-            None => bail!("connection closed"),
+        }
+    }
+
+    async fn handle_message(&mut self, msg: ServerMessage) -> Result<()> {
+        match &msg {
+            ServerMessage::Auth(_) => {
+                self.writer
+                    .send(ServerMessage::Auth(self.cap.clone()))
+                    .await?;
+
+                match self.reader.next().await {
+                    Some(Ok(msg)) => match msg {
+                        ClientMessage::AuthResponse(None) => Ok(()),
+                        ClientMessage::AuthResponse(Some(err)) => {
+                            bail!("failed to authenticate: {}", err);
+                        }
+                        _ => {
+                            bail!("unexpected message from server: {:?}", msg);
+                        }
+                    },
+                    Some(Err(err)) => {
+                        bail!("auth: failed to receive response: {:?}", err);
+                    }
+                    None => bail!("auth: connection closed"),
+                }
+            }
+            ServerMessage::PutBlob { .. } => {
+                self.writer.send(msg).await?;
+                match self.reader.next().await {
+                    Some(Ok(msg)) => match msg {
+                        ClientMessage::PutBlobResponse(None) => Ok(()),
+                        ClientMessage::PutBlobResponse(Some(err)) => {
+                            bail!("upload failed: {}", err);
+                        }
+                        _ => {
+                            bail!("unexpected message from server: {:?}", msg);
+                        }
+                    },
+                    Some(Err(err)) => {
+                        bail!("failed to receive response: {:?}", err);
+                    }
+                    None => bail!("connection closed"),
+                }
+            }
+            ServerMessage::PutMetrics { .. } => {
+                self.writer.send(msg).await?;
+                // we don't expect a response
+                Ok(())
+            }
+        }
+    }
+
+    async fn send_metrics(&mut self) {
+        if let Some(core) = iroh_metrics::core::Core::get() {
+            let dump = core.encode();
+
+            let (s, r) = oneshot::channel();
+            if let Err(err) = self
+                .internal_sender
+                .send((ServerMessage::PutMetrics { encoded: dump }, s))
+                .await
+            {
+                warn!("failed to send internal message: {:?}", err);
+                // spawn a task, to not block the run loop
+                tokio::task::spawn(async move {
+                    let res = r.await;
+                    debug!("metrics sent: {:?}", res);
+                });
+            }
         }
     }
 }
