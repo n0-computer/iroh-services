@@ -199,7 +199,7 @@ struct Actor {
 impl Actor {
     async fn run(mut self, enable_metrics: Option<Duration>) {
         if enable_metrics.is_some() {
-            iroh_metrics::core::Core::init(|reg, metrics| {
+            if let Err(err) = iroh_metrics::core::Core::try_init(|reg, metrics| {
                 use iroh::metrics::*;
                 use iroh_metrics::core::Metric;
 
@@ -207,7 +207,10 @@ impl Actor {
                 metrics.insert(NetReportMetrics::new(reg));
                 metrics.insert(PortmapMetrics::new(reg));
                 metrics.insert(MagicsockMetrics::new(reg));
-            });
+            }) {
+                // This is usually okay, as it just means metrics already got initialized somewhere else
+                debug!("failed to initialize metrics: {:?}", err);
+            }
         }
         let metrics_time = enable_metrics.unwrap_or_else(|| Duration::from_secs(60 * 60 * 24));
         let mut metrics_timer = tokio::time::interval(metrics_time);
