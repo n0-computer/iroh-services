@@ -7,6 +7,7 @@ use iroh::{
 };
 use iroh_blobs::{ticket::BlobTicket, BlobFormat, Hash};
 use n0_future::{task::AbortOnDropHandle, SinkExt, StreamExt};
+use rand::Rng;
 use rcan::Rcan;
 use tokio::sync::{mpsc, oneshot};
 use tokio_serde::formats::Bincode;
@@ -175,6 +176,15 @@ impl Client {
         r.await??;
         Ok(())
     }
+
+    /// Pings the remote node.
+    pub async fn ping(&mut self) -> Result<()> {
+        let (s, r) = oneshot::channel();
+        let req = rand::thread_rng().gen();
+        self.sender.send((ServerMessage::Ping { req }, s)).await?;
+        r.await??;
+        Ok(())
+    }
 }
 
 struct Actor {
@@ -282,6 +292,26 @@ impl Actor {
                 self.writer.send(msg).await?;
                 // we don't expect a response
                 Ok(())
+            }
+            ServerMessage::Ping { req } => {
+                let req = *req;
+                self.writer.send(msg).await?;
+
+                match self.reader.next().await {
+                    Some(Ok(msg)) => match msg {
+                        ClientMessage::Pong { req: req_back } => {
+                            ensure!(req_back == req, "unexpected pong response");
+                            Ok(())
+                        }
+                        _ => {
+                            bail!("unexpected message from server: {:?}", msg);
+                        }
+                    },
+                    Some(Err(err)) => {
+                        bail!("failed to receive response: {:?}", err);
+                    }
+                    None => bail!("connection closed"),
+                }
             }
         }
     }

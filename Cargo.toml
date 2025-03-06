@@ -25,7 +25,7 @@ ssh-key = { version = "0.6.7", features = ["ed25519"] }
 tokio = "1.43.0"
 iroh-metrics = "0.31.0"
 tracing = "0.1.41"
-rand = { version = "0.8", optional = true }
+rand = "0.8"
 
 [features]
-bin = ["dep:rand", "iroh-blobs/rpc"]
+bin = ["iroh-blobs/rpc"]
