@@ -7,6 +7,7 @@ use crate::caps::IpsCap;
 pub const ALPN: &[u8] = b"/iroh/ips/1";
 
 /// Messages sent from the client to the server
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     /// Authentication on first request

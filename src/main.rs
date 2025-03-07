@@ -1,8 +1,5 @@
-use std::time::Duration;
-
 use anyhow::Result;
-use iroh::protocol::Router;
-use iroh::{Endpoint, NodeAddr, NodeId};
+use iroh::{protocol::Router, Endpoint, NodeAddr, NodeId};
 use iroh_blobs::BlobFormat;
 use iroh_services::Client;
 use rand::Rng;
