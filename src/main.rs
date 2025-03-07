@@ -43,6 +43,7 @@ pub async fn main() -> Result<()> {
 
     // add blob on the client
     let num: u64 = rng.gen();
+    let name = format!("my-blob-{num}.txt");
     let client_blob = client_blobs
         .client()
         .add_bytes(format!("hello world-{num}"))
@@ -56,7 +57,7 @@ pub async fn main() -> Result<()> {
             client_addr.clone(),
             client_blob.hash,
             BlobFormat::Raw,
-            format!("my-blob-{num}.txt").into(),
+            name.clone().into(),
         )
         .await?;
 
@@ -71,6 +72,9 @@ pub async fn main() -> Result<()> {
         .await?;
 
     println!("downloaded blob: {:?}", blob);
+
+    let server_hash = rpc_client.get_tag(name).await?;
+    assert_eq!(server_hash, client_blob.hash);
 
     println!("waiting for Ctrl+C..");
     tokio::signal::ctrl_c().await?;

@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::{path::Path, str::FromStr, time::Duration};
 
 use anyhow::{bail, ensure, Context, Result};
 use iroh::{
@@ -21,7 +21,10 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Client {
-    sender: mpsc::Sender<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
+    sender: mpsc::Sender<(
+        ServerMessage,
+        oneshot::Sender<anyhow::Result<Option<ClientMessage>>>,
+    )>,
     _actor_task: AbortOnDropHandle<()>,
     cap: Rcan<IpsCap>,
 }
@@ -185,6 +188,23 @@ impl Client {
         r.await??;
         Ok(())
     }
+
+    pub async fn get_tag(&mut self, name: String) -> Result<Hash> {
+        let (s, r) = oneshot::channel();
+        self.sender
+            .send((ServerMessage::GetTag { name }, s))
+            .await?;
+        match r.await?? {
+            Some(res) => match res {
+                ClientMessage::GetTagResponse(hash) => match hash {
+                    Some(hash) => Ok(hash),
+                    None => bail!("blob not found"),
+                },
+                _ => bail!("unexpected response: {:?}", res),
+            },
+            None => bail!("missing response"),
+        }
+    }
 }
 
 struct Actor {
@@ -202,8 +222,14 @@ struct Actor {
         Bincode<ClientMessage, ServerMessage>,
     >,
     cap: Rcan<IpsCap>,
-    internal_receiver: mpsc::Receiver<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
-    internal_sender: mpsc::Sender<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
+    internal_receiver: mpsc::Receiver<(
+        ServerMessage,
+        oneshot::Sender<anyhow::Result<Option<ClientMessage>>>,
+    )>,
+    internal_sender: mpsc::Sender<(
+        ServerMessage,
+        oneshot::Sender<anyhow::Result<Option<ClientMessage>>>,
+    )>,
 }
 
 impl Actor {
@@ -230,9 +256,9 @@ impl Actor {
                 biased;
                 msg = self.internal_receiver.recv() => {
                     match msg {
-                        Some((server_msg, response)) => {
+                        Some((server_msg, responder)) => {
                             let res = self.handle_message(server_msg).await;
-                            response.send(res).ok();
+                            responder.send(res).ok();
                         }
                         None => {
                             debug!("shutting down");
@@ -247,7 +273,7 @@ impl Actor {
         }
     }
 
-    async fn handle_message(&mut self, msg: ServerMessage) -> Result<()> {
+    async fn handle_message(&mut self, msg: ServerMessage) -> Result<Option<ClientMessage>> {
         match &msg {
             ServerMessage::Auth(_) => {
                 self.writer
@@ -256,7 +282,7 @@ impl Actor {
 
                 match self.reader.next().await {
                     Some(Ok(msg)) => match msg {
-                        ClientMessage::AuthResponse(None) => Ok(()),
+                        ClientMessage::AuthResponse(None) => Ok(Some(ClientMessage::Ack)),
                         ClientMessage::AuthResponse(Some(err)) => {
                             bail!("failed to authenticate: {}", err);
                         }
@@ -274,9 +300,26 @@ impl Actor {
                 self.writer.send(msg).await?;
                 match self.reader.next().await {
                     Some(Ok(msg)) => match msg {
-                        ClientMessage::PutBlobResponse(None) => Ok(()),
+                        ClientMessage::PutBlobResponse(None) => Ok(Some(ClientMessage::Ack)),
                         ClientMessage::PutBlobResponse(Some(err)) => {
                             bail!("upload failed: {}", err);
+                        }
+                        _ => {
+                            bail!("unexpected message from server: {:?}", msg);
+                        }
+                    },
+                    Some(Err(err)) => {
+                        bail!("failed to receive response: {:?}", err);
+                    }
+                    None => bail!("connection closed"),
+                }
+            }
+            ServerMessage::GetTag { .. } => {
+                self.writer.send(msg).await?;
+                match self.reader.next().await {
+                    Some(Ok(msg)) => match msg {
+                        ClientMessage::GetTagResponse(hash) => {
+                            Ok(Some(ClientMessage::GetTagResponse(hash)))
                         }
                         _ => {
                             bail!("unexpected message from server: {:?}", msg);
@@ -291,7 +334,7 @@ impl Actor {
             ServerMessage::PutMetrics { .. } => {
                 self.writer.send(msg).await?;
                 // we don't expect a response
-                Ok(())
+                Ok(None)
             }
             ServerMessage::Ping { req } => {
                 let req = *req;
@@ -301,7 +344,7 @@ impl Actor {
                     Some(Ok(msg)) => match msg {
                         ClientMessage::Pong { req: req_back } => {
                             ensure!(req_back == req, "unexpected pong response");
-                            Ok(())
+                            Ok(None)
                         }
                         _ => {
                             bail!("unexpected message from server: {:?}", msg);
