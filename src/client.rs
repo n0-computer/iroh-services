@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_serde::formats::Bincode;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{debug, warn};
+use uuid::Uuid;
 
 use crate::{
     caps::{IpsCap, IpsCapV1},
@@ -125,6 +126,7 @@ impl ClientBuilder {
             cap: cap.clone(),
             internal_receiver,
             internal_sender: internal_sender.clone(),
+            session_id: Uuid::new_v4(),
         };
         let enable_metrics = self.enable_metrics;
         let run_handle = tokio::task::spawn(async move {
@@ -204,6 +206,7 @@ struct Actor {
     cap: Rcan<IpsCap>,
     internal_receiver: mpsc::Receiver<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
     internal_sender: mpsc::Sender<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
+    session_id: Uuid,
 }
 
 impl Actor {
@@ -323,7 +326,13 @@ impl Actor {
             let (s, r) = oneshot::channel();
             if let Err(err) = self
                 .internal_sender
-                .send((ServerMessage::PutMetrics { encoded: dump }, s))
+                .send((
+                    ServerMessage::PutMetrics {
+                        encoded: dump,
+                        session_id: self.session_id,
+                    },
+                    s,
+                ))
                 .await
             {
                 warn!("failed to send internal message: {:?}", err);
