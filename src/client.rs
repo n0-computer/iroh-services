@@ -1,6 +1,6 @@
 use std::{path::Path, time::Duration};
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use iroh::{
     endpoint::{RecvStream, SendStream},
     Endpoint, NodeAddr, NodeId,
@@ -21,7 +21,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Client {
-    sender: mpsc::Sender<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
+    sender: mpsc::Sender<ActorMessage>,
     _actor_task: AbortOnDropHandle<()>,
     cap: Rcan<IpsCap>,
 }
@@ -122,7 +122,6 @@ impl ClientBuilder {
             _endpoint: self.endpoint,
             reader,
             writer,
-            cap: cap.clone(),
             internal_receiver,
             internal_sender: internal_sender.clone(),
         };
@@ -153,7 +152,10 @@ impl Client {
     async fn authenticate(&mut self) -> Result<()> {
         let (s, r) = oneshot::channel();
         self.sender
-            .send((ServerMessage::Auth(self.cap.clone()), s))
+            .send(ActorMessage::Auth {
+                rcan: self.cap.clone(),
+                s,
+            })
             .await?;
         r.await??;
         Ok(())
@@ -171,7 +173,7 @@ impl Client {
 
         let (s, r) = oneshot::channel();
         self.sender
-            .send((ServerMessage::PutBlob { ticket, name }, s))
+            .send(ActorMessage::PutBlob { ticket, name, s })
             .await?;
         r.await??;
         Ok(())
@@ -181,9 +183,17 @@ impl Client {
     pub async fn ping(&mut self) -> Result<()> {
         let (s, r) = oneshot::channel();
         let req = rand::thread_rng().gen();
-        self.sender.send((ServerMessage::Ping { req }, s)).await?;
+        self.sender.send(ActorMessage::Ping { req, s }).await?;
         r.await??;
         Ok(())
+    }
+
+    /// Get the `Hash` behind the tag, if available.
+    pub async fn get_tag(&mut self, name: String) -> Result<Hash> {
+        let (s, r) = oneshot::channel();
+        self.sender.send(ActorMessage::GetTag { name, s }).await?;
+        let res = r.await??;
+        Ok(res)
     }
 }
 
@@ -201,9 +211,33 @@ struct Actor {
         ServerMessage,
         Bincode<ClientMessage, ServerMessage>,
     >,
-    cap: Rcan<IpsCap>,
-    internal_receiver: mpsc::Receiver<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
-    internal_sender: mpsc::Sender<(ServerMessage, oneshot::Sender<anyhow::Result<()>>)>,
+    internal_receiver: mpsc::Receiver<ActorMessage>,
+    internal_sender: mpsc::Sender<ActorMessage>,
+}
+
+#[allow(clippy::large_enum_variant)]
+enum ActorMessage {
+    Auth {
+        rcan: Rcan<IpsCap>,
+        s: oneshot::Sender<anyhow::Result<()>>,
+    },
+    PutBlob {
+        ticket: BlobTicket,
+        name: String,
+        s: oneshot::Sender<anyhow::Result<()>>,
+    },
+    Ping {
+        req: [u8; 32],
+        s: oneshot::Sender<anyhow::Result<()>>,
+    },
+    PutMetrics {
+        encoded: String,
+        s: oneshot::Sender<anyhow::Result<()>>,
+    },
+    GetTag {
+        name: String,
+        s: oneshot::Sender<anyhow::Result<Hash>>,
+    },
 }
 
 impl Actor {
@@ -230,9 +264,8 @@ impl Actor {
                 biased;
                 msg = self.internal_receiver.recv() => {
                     match msg {
-                        Some((server_msg, response)) => {
-                            let res = self.handle_message(server_msg).await;
-                            response.send(res).ok();
+                        Some(server_msg) => {
+                            self.handle_message(server_msg).await;
                         }
                         None => {
                             debug!("shutting down");
@@ -247,71 +280,96 @@ impl Actor {
         }
     }
 
-    async fn handle_message(&mut self, msg: ServerMessage) -> Result<()> {
-        match &msg {
-            ServerMessage::Auth(_) => {
-                self.writer
-                    .send(ServerMessage::Auth(self.cap.clone()))
-                    .await?;
+    async fn handle_message(&mut self, msg: ActorMessage) {
+        match msg {
+            ActorMessage::Auth { rcan, s } => {
+                if let Err(err) = self.writer.send(ServerMessage::Auth(rcan)).await {
+                    s.send(Err(err.into())).ok();
+                    return;
+                }
 
-                match self.reader.next().await {
+                let response = match self.reader.next().await {
                     Some(Ok(msg)) => match msg {
                         ClientMessage::AuthResponse(None) => Ok(()),
                         ClientMessage::AuthResponse(Some(err)) => {
-                            bail!("failed to authenticate: {}", err);
+                            Err(anyhow!("failed to authenticate: {}", err))
                         }
-                        _ => {
-                            bail!("unexpected message from server: {:?}", msg);
-                        }
+                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
                     },
-                    Some(Err(err)) => {
-                        bail!("auth: failed to receive response: {:?}", err);
-                    }
-                    None => bail!("auth: connection closed"),
-                }
+                    Some(Err(err)) => Err(anyhow!("auth: failed to receive response: {:?}", err)),
+                    None => Err(anyhow!("auth: connection closed")),
+                };
+                s.send(response).ok();
             }
-            ServerMessage::PutBlob { .. } => {
-                self.writer.send(msg).await?;
-                match self.reader.next().await {
+            ActorMessage::PutBlob { ticket, name, s } => {
+                if let Err(err) = self
+                    .writer
+                    .send(ServerMessage::PutBlob { name, ticket })
+                    .await
+                {
+                    s.send(Err(err.into())).ok();
+                    return;
+                }
+                let response = match self.reader.next().await {
                     Some(Ok(msg)) => match msg {
                         ClientMessage::PutBlobResponse(None) => Ok(()),
                         ClientMessage::PutBlobResponse(Some(err)) => {
-                            bail!("upload failed: {}", err);
+                            Err(anyhow!("upload failed: {}", err))
                         }
-                        _ => {
-                            bail!("unexpected message from server: {:?}", msg);
-                        }
+                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
                     },
-                    Some(Err(err)) => {
-                        bail!("failed to receive response: {:?}", err);
-                    }
-                    None => bail!("connection closed"),
-                }
+                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
+                    None => Err(anyhow!("connection closed")),
+                };
+                s.send(response).ok();
             }
-            ServerMessage::PutMetrics { .. } => {
-                self.writer.send(msg).await?;
+            ActorMessage::GetTag { name, s } => {
+                if let Err(err) = self.writer.send(ServerMessage::GetTag { name }).await {
+                    s.send(Err(err.into())).ok();
+                    return;
+                };
+                let response = match self.reader.next().await {
+                    Some(Ok(msg)) => match msg {
+                        ClientMessage::GetTagResponse(maybe_hash) => match maybe_hash {
+                            Some(hash) => Ok(hash),
+                            None => Err(anyhow!("blob not found")),
+                        },
+                        _ => Err(anyhow!("unexpected response: {:?}", msg)),
+                    },
+                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
+                    None => Err(anyhow!("connection closed")),
+                };
+                s.send(response).ok();
+            }
+            ActorMessage::PutMetrics { encoded, s } => {
+                let response = self
+                    .writer
+                    .send(ServerMessage::PutMetrics { encoded })
+                    .await;
                 // we don't expect a response
-                Ok(())
+                s.send(response.map_err(Into::into)).ok();
             }
-            ServerMessage::Ping { req } => {
-                let req = *req;
-                self.writer.send(msg).await?;
+            ActorMessage::Ping { req, s } => {
+                if let Err(err) = self.writer.send(ServerMessage::Ping { req }).await {
+                    s.send(Err(err.into())).ok();
+                    return;
+                }
 
-                match self.reader.next().await {
+                let response = match self.reader.next().await {
                     Some(Ok(msg)) => match msg {
                         ClientMessage::Pong { req: req_back } => {
-                            ensure!(req_back == req, "unexpected pong response");
-                            Ok(())
+                            if req_back != req {
+                                Err(anyhow!("unexpected pong response"))
+                            } else {
+                                Ok(())
+                            }
                         }
-                        _ => {
-                            bail!("unexpected message from server: {:?}", msg);
-                        }
+                        _ => Err(anyhow!("unexpected message from server: {:?}", msg)),
                     },
-                    Some(Err(err)) => {
-                        bail!("failed to receive response: {:?}", err);
-                    }
-                    None => bail!("connection closed"),
-                }
+                    Some(Err(err)) => Err(anyhow!("failed to receive response: {:?}", err)),
+                    None => Err(anyhow!("connection closed")),
+                };
+                s.send(response).ok();
             }
         }
     }
@@ -323,7 +381,7 @@ impl Actor {
             let (s, r) = oneshot::channel();
             if let Err(err) = self
                 .internal_sender
-                .send((ServerMessage::PutMetrics { encoded: dump }, s))
+                .send(ActorMessage::PutMetrics { encoded: dump, s })
                 .await
             {
                 warn!("failed to send internal message: {:?}", err);
