@@ -15,14 +15,18 @@ pub enum ServerMessage {
     PutBlob { ticket: BlobTicket, name: String },
     /// Request to store the given metrics data
     PutMetrics { encoded: String },
+    /// Simple ping requests
+    Ping { req: [u8; 32] },
 }
 
 /// Messages sent from the server to the client
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     /// Authentication response
-    // if set, error, otherwise ok
+    /// if set, error, otherwise ok
     AuthResponse(Option<String>),
-    // If set, this means it was an error.
+    /// If set, this means it was an error.
     PutBlobResponse(Option<String>),
+    /// Simple pong response
+    Pong { req: [u8; 32] },
 }
