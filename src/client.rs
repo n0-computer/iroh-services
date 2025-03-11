@@ -272,16 +272,18 @@ impl Actor {
                             self.handle_message(server_msg).await;
                         }
                         None => {
-                            debug!("shutting down");
                             break;
                         }
                     }
                 }
                 _ = metrics_timer.tick(), if enable_metrics.is_some() => {
+                    debug!("metrics_timer::tick()");
                     self.send_metrics().await;
                 }
             }
         }
+
+        debug!("shutting down");
     }
 
     async fn handle_message(&mut self, msg: ActorMessage) {
@@ -400,12 +402,12 @@ impl Actor {
                 .await
             {
                 warn!("failed to send internal message: {:?}", err);
-                // spawn a task, to not block the run loop
-                tokio::task::spawn(async move {
-                    let res = r.await;
-                    debug!("metrics sent: {:?}", res);
-                });
             }
+            // spawn a task, to not block the run loop
+            tokio::task::spawn(async move {
+                let res = r.await;
+                debug!("metrics sent: {:?}", res);
+            });
         }
     }
 }
