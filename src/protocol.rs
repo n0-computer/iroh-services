@@ -1,6 +1,7 @@
 use iroh_blobs::{ticket::BlobTicket, Hash};
 use rcan::Rcan;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::caps::IpsCap;
 
@@ -17,7 +18,7 @@ pub enum ServerMessage {
     /// Request the name of a blob held by the node
     GetTag { name: String },
     /// Request to store the given metrics data
-    PutMetrics { encoded: String },
+    PutMetrics { encoded: String, session_id: Uuid },
     /// Simple ping requests
     Ping { req: [u8; 32] },
 }

@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_serde::formats::Bincode;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{debug, warn};
+use uuid::Uuid;
 
 use crate::{
     caps::{IpsCap, IpsCapV1},
@@ -124,6 +125,7 @@ impl ClientBuilder {
             writer,
             internal_receiver,
             internal_sender: internal_sender.clone(),
+            session_id: Uuid::new_v4(),
         };
         let enable_metrics = self.enable_metrics;
         let run_handle = tokio::task::spawn(async move {
@@ -213,6 +215,7 @@ struct Actor {
     >,
     internal_receiver: mpsc::Receiver<ActorMessage>,
     internal_sender: mpsc::Sender<ActorMessage>,
+    session_id: Uuid,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -232,6 +235,7 @@ enum ActorMessage {
     },
     PutMetrics {
         encoded: String,
+        session_id: Uuid,
         s: oneshot::Sender<anyhow::Result<()>>,
     },
     GetTag {
@@ -268,16 +272,18 @@ impl Actor {
                             self.handle_message(server_msg).await;
                         }
                         None => {
-                            debug!("shutting down");
                             break;
                         }
                     }
                 }
                 _ = metrics_timer.tick(), if enable_metrics.is_some() => {
+                    debug!("metrics_timer::tick()");
                     self.send_metrics().await;
                 }
             }
         }
+
+        debug!("shutting down");
     }
 
     async fn handle_message(&mut self, msg: ActorMessage) {
@@ -341,10 +347,17 @@ impl Actor {
                 };
                 s.send(response).ok();
             }
-            ActorMessage::PutMetrics { encoded, s } => {
+            ActorMessage::PutMetrics {
+                encoded,
+                session_id,
+                s,
+            } => {
                 let response = self
                     .writer
-                    .send(ServerMessage::PutMetrics { encoded })
+                    .send(ServerMessage::PutMetrics {
+                        encoded,
+                        session_id,
+                    })
                     .await;
                 // we don't expect a response
                 s.send(response.map_err(Into::into)).ok();
@@ -381,16 +394,20 @@ impl Actor {
             let (s, r) = oneshot::channel();
             if let Err(err) = self
                 .internal_sender
-                .send(ActorMessage::PutMetrics { encoded: dump, s })
+                .send(ActorMessage::PutMetrics {
+                    encoded: dump,
+                    session_id: self.session_id,
+                    s,
+                })
                 .await
             {
                 warn!("failed to send internal message: {:?}", err);
-                // spawn a task, to not block the run loop
-                tokio::task::spawn(async move {
-                    let res = r.await;
-                    debug!("metrics sent: {:?}", res);
-                });
             }
+            // spawn a task, to not block the run loop
+            tokio::task::spawn(async move {
+                let res = r.await;
+                debug!("metrics sent: {:?}", res);
+            });
         }
     }
 }
