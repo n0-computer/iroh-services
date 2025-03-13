@@ -1,12 +1,12 @@
 [package]
-name = "iroh-services"
+name = "iroh-n0des"
 version = "0.1.0"
 edition = "2021"
 readme = "README.md"
 description = "p2p quic connections dialed by public key"
 license = "MIT OR Apache-2.0"
 authors = ["n0 team"]
-repository = "https://github.com/n0-computer/iroh-services"
+repository = "https://github.com/n0-computer/iroh-n0des"
 keywords = ["quic", "networking", "holepunching", "p2p"]
 rust-version = "1.81"
 

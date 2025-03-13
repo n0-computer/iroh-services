@@ -2121,6 +2121,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "iroh-n0des"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ed25519-dalek",
+ "iroh",
+ "iroh-blobs",
+ "iroh-metrics",
+ "n0-future",
+ "rand 0.8.5",
+ "rcan",
+ "serde",
+ "ssh-key",
+ "tokio",
+ "tokio-serde",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "iroh-net-report"
 version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2261,27 +2282,6 @@ dependencies = [
  "url",
  "webpki-roots",
  "z32",
-]
-
-[[package]]
-name = "iroh-services"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ed25519-dalek",
- "iroh",
- "iroh-blobs",
- "iroh-metrics",
- "n0-future",
- "rand 0.8.5",
- "rcan",
- "serde",
- "ssh-key",
- "tokio",
- "tokio-serde",
- "tokio-util",
- "tracing",
- "uuid",
 ]
 
 [[package]]

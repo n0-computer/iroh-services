@@ -1,6 +1,6 @@
-# iroh-services
+# iroh-n0des
 
-> A client to interact with iroh protocol services, using iroh itself.
+An iroh protocol to interact with n0des, using iroh itself.
 
 
 ## License
