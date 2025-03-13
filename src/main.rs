@@ -1,7 +1,7 @@
 use anyhow::Result;
 use iroh::{protocol::Router, Endpoint, NodeAddr, NodeId};
 use iroh_blobs::BlobFormat;
-use iroh_services::Client;
+use iroh_n0des::Client;
 use rand::Rng;
 use ssh_key::Algorithm;
 use tracing::debug;
