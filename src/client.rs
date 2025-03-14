@@ -126,6 +126,7 @@ impl ClientBuilder {
             internal_receiver,
             internal_sender: internal_sender.clone(),
             session_id: Uuid::new_v4(),
+            token: cap.encode(),
         };
         let enable_metrics = self.enable_metrics;
         let run_handle = tokio::task::spawn(async move {
@@ -216,6 +217,7 @@ struct Actor {
     internal_receiver: mpsc::Receiver<ActorMessage>,
     internal_sender: mpsc::Sender<ActorMessage>,
     session_id: Uuid,
+    token: Vec<u8>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -236,6 +238,7 @@ enum ActorMessage {
     PutMetrics {
         encoded: String,
         session_id: Uuid,
+        token: Vec<u8>,
         s: oneshot::Sender<anyhow::Result<()>>,
     },
     GetTag {
@@ -350,6 +353,7 @@ impl Actor {
             ActorMessage::PutMetrics {
                 encoded,
                 session_id,
+                token,
                 s,
             } => {
                 let response = self
@@ -357,6 +361,7 @@ impl Actor {
                     .send(ServerMessage::PutMetrics {
                         encoded,
                         session_id,
+                        token: String::from_utf8(token.clone()).unwrap(),
                     })
                     .await;
                 // we don't expect a response
@@ -397,6 +402,7 @@ impl Actor {
                 .send(ActorMessage::PutMetrics {
                     encoded: dump,
                     session_id: self.session_id,
+                    token: self.token.clone(),
                     s,
                 })
                 .await

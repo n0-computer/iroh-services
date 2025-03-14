@@ -18,7 +18,11 @@ pub enum ServerMessage {
     /// Request the name of a blob held by the node
     GetTag { name: String },
     /// Request to store the given metrics data
-    PutMetrics { encoded: String, session_id: Uuid },
+    PutMetrics {
+        encoded: String,
+        session_id: Uuid,
+        pub_key: String,
+    },
     /// Simple ping requests
     Ping { req: [u8; 32] },
 }
