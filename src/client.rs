@@ -16,7 +16,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::{
-    caps::{IpsCap, IpsCapV1},
+    caps::{N0desCap, N0desCapV1},
     protocol::{ClientMessage, ServerMessage, ALPN},
 };
 
@@ -24,12 +24,12 @@ use crate::{
 pub struct Client {
     sender: mpsc::Sender<ActorMessage>,
     _actor_task: AbortOnDropHandle<()>,
-    cap: Rcan<IpsCap>,
+    cap: Rcan<N0desCap>,
 }
 
-/// Constructs an IPS client
+/// Constructs a n0des client
 pub struct ClientBuilder {
-    cap: Option<Rcan<IpsCap>>,
+    cap: Option<Rcan<N0desCap>>,
     cap_expiry: Duration,
     endpoint: Endpoint,
     enable_metrics: Option<Duration>,
@@ -79,9 +79,9 @@ impl ClientBuilder {
     }
 
     /// Sets the capability.
-    pub fn capability(mut self, cap: Rcan<IpsCap>) -> Result<Self> {
+    pub fn capability(mut self, cap: Rcan<N0desCap>) -> Result<Self> {
         ensure!(
-            cap.capability() == &IpsCap::V1(IpsCapV1::Api),
+            cap.capability() == &N0desCap::V1(N0desCapV1::Api),
             "invalid capability"
         );
         ensure!(
@@ -221,7 +221,7 @@ struct Actor {
 #[allow(clippy::large_enum_variant)]
 enum ActorMessage {
     Auth {
-        rcan: Rcan<IpsCap>,
+        rcan: Rcan<N0desCap>,
         s: oneshot::Sender<anyhow::Result<()>>,
     },
     PutBlob {
