@@ -21,7 +21,7 @@ pub enum ServerMessage {
     PutMetrics {
         encoded: String,
         session_id: Uuid,
-        pub_key: String,
+        token: String,
     },
     /// Simple ping requests
     Ping { req: [u8; 32] },
