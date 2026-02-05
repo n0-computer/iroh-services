@@ -79,7 +79,3 @@ required-features = ["net_diagnostics"]
 [[example]]
 name = "tickets"
 required-features = ["tickets"]
-
-[[example]]
-name = "net_diagnostics"
-required-features = ["net_diagnostics"]
