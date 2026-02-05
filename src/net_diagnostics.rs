@@ -33,7 +33,6 @@ pub struct PortMapProbe {
     pub nat_pmp: bool,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticsReport {
     pub endpoint_id: iroh::EndpointId,
