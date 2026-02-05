@@ -15,20 +15,13 @@ use std::{
 };
 
 use anyhow::Result;
-#[allow(unused_imports)]
-use iroh::{
-    Endpoint, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey, Watcher, dns::DnsResolver,
-};
-#[allow(unused_imports)]
-use iroh_relay::{
-    RelayQuicConfig,
-    protos::relay::{ClientToRelayMsg, RelayToClientMsg},
-};
+use iroh::{Endpoint, RelayUrl, SecretKey, Watcher, dns::DnsResolver};
+use iroh_relay::protos::relay::{ClientToRelayMsg, RelayToClientMsg};
 use n0_future::{SinkExt, StreamExt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 enum NatType {
+    #[allow(dead_code)]
     Easy,
     Medium,
     Hard,
@@ -410,5 +403,21 @@ fn fmt_dur(d: Option<Duration>) -> String {
     match d {
         Some(d) => format!("{:.1?}", d),
         None => "n/a".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_diagnose() {
+        let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
+            .bind()
+            .await
+            .unwrap();
+        let report = diagnose(&endpoint).await.unwrap();
+        println!("{report}");
+        endpoint.close().await;
     }
 }
