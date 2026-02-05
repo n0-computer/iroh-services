@@ -4,7 +4,7 @@ use rcan::Rcan;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::caps::Caps;
+use crate::{caps::Caps, net_diagnostics::DiagnosticsReport};
 
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
 
@@ -30,6 +30,8 @@ pub enum N0desProtocol {
     #[rpc(tx=oneshot::Sender<RemoteResult<Vec<TicketData>>>)]
     TicketList(ListTickets),
 
+    #[rpc(tx=oneshot::Sender<RemoteResult<DiagnosticsReport>>)]
+    RunNetworkDiagnostics(RunNetworkDiagnostics),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     PutNetworkDiagnostics(PutNetworkDiagnostics),
 }
