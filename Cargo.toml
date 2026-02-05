@@ -44,6 +44,8 @@ ssh-key = { version = "0.7.0-rc.3", features = ["ed25519"], optional = true }
 quinn = { package = "iroh-quinn", version = "0.16.0", default-features = false, optional = true }
 time = { version = "0.3.41", features = ["serde", "serde-well-known"], optional = true }
 tokio-util = { version = "0.7.16", optional = true }
+iroh-relay = { version = "0.96", optional = true }
+portmapper = { version = "0.13", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3.2", features = ["wasm_js"] }
@@ -57,6 +59,7 @@ tokio = { version = "1.45", features = ["macros", "rt", "rt-multi-thread"] }
 default = ["client"]
 client = []
 tickets = []
+net_diagnostics = ["dep:iroh-relay", "dep:portmapper"]
 ssh-key = [
     "dep:ssh-key"
 ]
