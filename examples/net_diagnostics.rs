@@ -5,7 +5,6 @@
 //! port mapping protocol availability.
 //!
 //! Run with: cargo run --features=net_diagnostics --example net_diagnostics
-//!
 use anyhow::Result;
 use iroh::Endpoint;
 use iroh_n0des::Client;
