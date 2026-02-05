@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["diagnose"],"struct":["DiagnosticsReport","RelayLatency"]};
+window.SIDEBAR_ITEMS = {"fn":["diagnose"],"struct":["DiagnosticsReport"]};
