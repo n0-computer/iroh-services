@@ -19,6 +19,8 @@ use uuid::Uuid;
 
 #[cfg(feature = "net_diagnostics")]
 use crate::net_diagnostics::{DiagnosticsReport, diagnose};
+#[cfg(feature = "net_diagnostics")]
+use crate::protocol::PutNetworkDiagnostics;
 #[cfg(feature = "tickets")]
 use crate::protocol::{GetTicket, ListTickets, PublishTicket, TicketData, UnpublishTicket};
 use crate::{
@@ -299,11 +301,26 @@ impl Client {
             .map_err(Error::Remote)
     }
 
+    /// run local network status diagnostics, optionally uploading the results
     #[cfg(feature = "net_diagnostics")]
-    pub async fn net_diagnostics(&self) -> DiagnosticsReport {
-        diagnose(&self.endpoint)
-            .await
-            .unwrap_or_else(|e| panic!("net_diagnostics failed: {e}"))
+    pub async fn net_diagnostics(&self, send: bool) -> Result<DiagnosticsReport, Error> {
+        let report = diagnose(&self.endpoint).await?;
+        if send {
+            let (tx, rx) = oneshot::channel();
+            self.message_channel
+                .send(ClientActorMessage::PutNetworkDiagnostics {
+                    done: tx,
+                    report: report.clone(),
+                })
+                .await
+                .map_err(|_| Error::Other(anyhow!("sending network diagnostics report")))?;
+
+            let _ = rx
+                .await
+                .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?;
+        }
+
+        Ok(report)
     }
 
     /// Publish a [ticket] to n0des so others can find it by calling fetch_tickets.
@@ -445,6 +462,11 @@ enum ClientActorMessage {
     Ping {
         done: oneshot::Sender<Result<Pong, RemoteError>>,
     },
+    #[cfg(feature = "net_diagnostics")]
+    PutNetworkDiagnostics {
+        report: DiagnosticsReport,
+        done: oneshot::Sender<Result<(), Error>>,
+    },
     #[cfg(feature = "tickets")]
     PublishTicket {
         name: String,
@@ -520,6 +542,13 @@ impl ClientActor {
                             if let Err(err) = done.send(res) {
                                 debug!("failed to push metrics: {:#?}", err);
                                 self.authorized = false;
+                            }
+                        }
+                        #[cfg(feature = "net_diagnostics")]
+                        ClientActorMessage::PutNetworkDiagnostics{ report, done } => {
+                            let res = self.put_network_diagnostics(report).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to publish network diagnostics: {:#?}", err);
                             }
                         }
                         #[cfg(feature = "tickets")]
@@ -608,6 +637,24 @@ impl ClientActor {
             session_id: self.session_id,
             update,
         };
+
+        self.client
+            .rpc(req)
+            .await
+            .map_err(|_| RemoteError::InternalServerError)??;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "net_diagnostics")]
+    async fn put_network_diagnostics(
+        &mut self,
+        report: crate::net_diagnostics::DiagnosticsReport,
+    ) -> Result<(), Error> {
+        trace!("client actor publish network diagnostics");
+        self.auth().await?;
+
+        let req = PutNetworkDiagnostics { report };
 
         self.client
             .rpc(req)

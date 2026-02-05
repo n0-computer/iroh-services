@@ -18,8 +18,9 @@ use anyhow::Result;
 use iroh::{Endpoint, RelayUrl, SecretKey, Watcher, dns::DnsResolver};
 use iroh_relay::protos::relay::{ClientToRelayMsg, RelayToClientMsg};
 use n0_future::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum NatType {
     #[allow(dead_code)]
     Easy,
@@ -59,7 +60,7 @@ impl fmt::Display for NatType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayLatency {
     url: RelayUrl,
     connect_time: Option<Duration>,
@@ -67,7 +68,7 @@ pub struct RelayLatency {
     error: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticsReport {
     node_id: iroh::EndpointId,
     udp_v4: bool,

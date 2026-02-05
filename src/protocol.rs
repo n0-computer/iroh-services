@@ -29,6 +29,9 @@ pub enum N0desProtocol {
     TicketGet(GetTicket),
     #[rpc(tx=oneshot::Sender<RemoteResult<Vec<TicketData>>>)]
     TicketList(ListTickets),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    PutNetworkDiagnostics(PutNetworkDiagnostics),
 }
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
