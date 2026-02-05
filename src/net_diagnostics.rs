@@ -1,134 +1,86 @@
-//! Network diagnostics example for iroh-powered applications.
+//! Network diagnostics for iroh-powered applications.
 //!
-//! Demonstrates how to run a full network diagnostics report from an existing
-//! iroh Endpoint — covering NAT type, UDP connectivity, relay latency, and
-//! port mapping protocol availability.
-//!
-//! Run with: cargo run --example diagnose
-//!
-//! This is designed to be copy-pasteable into your own project.
+//! Collects a full network diagnostics report from an existing iroh Endpoint
+//! covering UDP connectivity, relay latency, and port mapping protocol
+//! availability.
 
 use std::{
     fmt,
-    net::{SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::SocketAddr,
     time::{Duration, Instant},
 };
 
 use anyhow::Result;
-use iroh::{Endpoint, RelayUrl, SecretKey, Watcher, dns::DnsResolver};
+use iroh::{Endpoint, NetReport, RelayUrl, SecretKey, Watcher, dns::DnsResolver};
 use iroh_relay::protos::relay::{ClientToRelayMsg, RelayToClientMsg};
 use n0_future::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-enum NatType {
-    #[allow(dead_code)]
-    Easy,
-    Medium,
-    Hard,
-    Unknown,
-}
-
-impl NatType {
-    fn description(&self) -> &'static str {
-        match self {
-            Self::Easy => "NAT allows easy P2P connectivity",
-            Self::Medium => "NAT may require additional techniques for P2P",
-            Self::Hard => "NAT is difficult for P2P connectivity",
-            Self::Unknown => "NAT type could not be determined",
-        }
-    }
-
-    fn difficulty(&self) -> u8 {
-        match self {
-            Self::Easy => 1,
-            Self::Medium => 3,
-            Self::Hard => 5,
-            Self::Unknown => 4,
-        }
-    }
-}
-
-impl fmt::Display for NatType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Easy => write!(f, "Easy"),
-            Self::Medium => write!(f, "Medium"),
-            Self::Hard => write!(f, "Hard"),
-            Self::Unknown => write!(f, "Unknown"),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayLatency {
-    url: RelayUrl,
-    connect_time: Option<Duration>,
-    ping_latency: Option<Duration>,
-    error: Option<String>,
+    pub url: RelayUrl,
+    pub connect_time: Option<Duration>,
+    pub ping_latency: Option<Duration>,
+    pub error: Option<String>,
+}
+
+/// Port mapping protocol availability on the LAN.
+/// This can be avoided if we make the original port mapping probe return a serde-able struct.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortMapProbe {
+    pub upnp: bool,
+    pub pcp: bool,
+    pub nat_pmp: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticsReport {
-    node_id: iroh::EndpointId,
-    udp_v4: bool,
-    udp_v6: bool,
-    global_v4: Option<SocketAddrV4>,
-    global_v6: Option<SocketAddrV6>,
-    mapping_varies_by_dest_v4: Option<bool>,
-    mapping_varies_by_dest_v6: Option<bool>,
-    mapping_varies_by_dest_port_v4: Option<bool>,
-    mapping_varies_by_dest_port_v6: Option<bool>,
-    nat_type: NatType,
-    relay_urls: Vec<RelayUrl>,
-    direct_addrs: Vec<SocketAddr>,
-    relay_latencies: Vec<RelayLatency>,
-    portmap_probe: Option<String>,
+    pub endpoint_id: iroh::EndpointId,
+    pub net_report: Option<NetReport>,
+    pub direct_addrs: Vec<SocketAddr>,
+    pub relay_latencies: Vec<RelayLatency>,
+    pub portmap_probe: Option<PortMapProbe>,
 }
 
 impl fmt::Display for DiagnosticsReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "=== iroh Network Diagnostics ===")?;
-        writeln!(f, "Node ID: {}", self.node_id)?;
+        writeln!(f, "Endpoint ID: {}", self.endpoint_id)?;
 
-        writeln!(
-            f,
-            "UDP IPv4: {} | Global: {}",
-            yn(self.udp_v4),
-            opt_addr_v4(self.global_v4)
-        )?;
-        writeln!(
-            f,
-            "UDP IPv6: {} | Global: {}",
-            yn(self.udp_v6),
-            opt_addr_v6(self.global_v6)
-        )?;
-
-        writeln!(
-            f,
-            "NAT Type: {} (difficulty {}/5) — {}",
-            self.nat_type,
-            self.nat_type.difficulty(),
-            self.nat_type.description()
-        )?;
-        writeln!(
-            f,
-            "NAT mapping varies by dest addr (v4): {}  (v6): {}",
-            opt_bool(self.mapping_varies_by_dest_v4),
-            opt_bool(self.mapping_varies_by_dest_v6),
-        )?;
-        writeln!(
-            f,
-            "NAT mapping varies by dest port (v4): {}  (v6): {}",
-            opt_bool(self.mapping_varies_by_dest_port_v4),
-            opt_bool(self.mapping_varies_by_dest_port_v6),
-        )?;
-
-        if self.relay_urls.is_empty() {
-            writeln!(f, "Relay: none")?;
+        if let Some(ref nr) = self.net_report {
+            writeln!(
+                f,
+                "UDP IPv4: {} | Global: {}",
+                yn(nr.udp_v4),
+                nr.global_v4
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "none".into())
+            )?;
+            writeln!(
+                f,
+                "UDP IPv6: {} | Global: {}",
+                yn(nr.udp_v6),
+                nr.global_v6
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "none".into())
+            )?;
+            writeln!(
+                f,
+                "NAT mapping varies by dest (v4): {}  (v6): {}",
+                opt_bool(nr.mapping_varies_by_dest_ipv4),
+                opt_bool(nr.mapping_varies_by_dest_ipv6),
+            )?;
+            writeln!(
+                f,
+                "Preferred relay: {}",
+                nr.preferred_relay
+                    .as_ref()
+                    .map(|u| u.to_string())
+                    .unwrap_or_else(|| "none".into())
+            )?;
+            writeln!(f, "Captive portal: {}", opt_bool(nr.captive_portal))?;
         } else {
-            let urls: Vec<_> = self.relay_urls.iter().map(|u| u.to_string()).collect();
-            writeln!(f, "Relay URLs: {}", urls.join(", "))?;
+            writeln!(f, "Net report: unavailable")?;
         }
 
         if !self.relay_latencies.is_empty() {
@@ -156,7 +108,13 @@ impl fmt::Display for DiagnosticsReport {
         }
 
         if let Some(ref probe) = self.portmap_probe {
-            writeln!(f, "Port mapping: {probe}")?;
+            writeln!(
+                f,
+                "Port mapping: UPnP: {}, PCP: {}, NAT-PMP: {}",
+                yn(probe.upnp),
+                yn(probe.pcp),
+                yn(probe.nat_pmp),
+            )?;
         } else {
             writeln!(f, "Port mapping: probe failed or timed out")?;
         }
@@ -175,7 +133,7 @@ async fn diagnose_with_timeout(
     endpoint: &Endpoint,
     timeout: Duration,
 ) -> Result<DiagnosticsReport> {
-    let node_id = endpoint.id();
+    let endpoint_id = endpoint.id();
 
     // 1. Wait for relay connection
     if tokio::time::timeout(timeout, endpoint.online())
@@ -195,31 +153,15 @@ async fn diagnose_with_timeout(
         }
     };
 
-    // 3. Extract fields + classify NAT
-    let (udp_v4, udp_v6, global_v4, global_v6, varies_dest_v4, varies_dest_v6) = match net_report {
-        Some(ref r) => (
-            r.udp_v4,
-            r.udp_v6,
-            r.global_v4,
-            r.global_v6,
-            r.mapping_varies_by_dest_ipv4,
-            r.mapping_varies_by_dest_ipv6,
-        ),
-        None => (false, false, None, None, None, None),
-    };
-
-    let nat_type = classify_nat(&net_report);
-
-    // 4. Endpoint address info
+    // 3. Endpoint address info
     let addr = endpoint.addr();
     let relay_urls: Vec<RelayUrl> = addr.relay_urls().cloned().collect();
     let direct_addrs: Vec<SocketAddr> = addr.ip_addrs().copied().collect();
 
-    // 5. Relay latency + port mapping probe in parallel
-    let relay_urls_clone = relay_urls.clone();
+    // 4. Relay latency + port mapping probe in parallel
     let relay_fut = async {
         let mut results = Vec::new();
-        for url in &relay_urls_clone {
+        for url in &relay_urls {
             results.push(probe_relay_latency(url).await);
         }
         results
@@ -227,7 +169,7 @@ async fn diagnose_with_timeout(
 
     let portmap_fut = async {
         match tokio::time::timeout(Duration::from_secs(5), probe_port_mapping()).await {
-            Ok(Ok(s)) => Some(s),
+            Ok(Ok(p)) => Some(p),
             Ok(Err(e)) => {
                 eprintln!("portmap probe failed: {e}");
                 None
@@ -242,53 +184,12 @@ async fn diagnose_with_timeout(
     let (relay_latencies, portmap_probe) = tokio::join!(relay_fut, portmap_fut);
 
     Ok(DiagnosticsReport {
-        node_id,
-        udp_v4,
-        udp_v6,
-        global_v4,
-        global_v6,
-        mapping_varies_by_dest_v4: varies_dest_v4,
-        mapping_varies_by_dest_v6: varies_dest_v6,
-        // Not yet implemented in iroh's NetReport
-        mapping_varies_by_dest_port_v4: None,
-        mapping_varies_by_dest_port_v6: None,
-        nat_type,
-        relay_urls,
+        endpoint_id,
+        net_report,
         direct_addrs,
         relay_latencies,
         portmap_probe,
     })
-}
-
-/// Classifies NAT type based on address mapping behavior observed across
-/// multiple relay servers. iroh's NetReport probes several relays and
-/// compares the external address seen by each — if it differs, the NAT
-/// is endpoint-dependent (Hard).
-///
-/// Note: port-dependent mapping detection is not yet implemented in iroh,
-/// so we conservatively classify stable-address NATs as Medium rather than
-/// Easy (we can't confirm the port is also stable).
-fn classify_nat(report: &Option<iroh::NetReport>) -> NatType {
-    let Some(r) = report else {
-        return NatType::Unknown;
-    };
-
-    if r.global_v4.is_none() && r.global_v6.is_none() {
-        return NatType::Unknown;
-    }
-    if !r.udp_v4 && !r.udp_v6 {
-        return NatType::Unknown;
-    }
-
-    let mapping_varies_by_dest = r
-        .mapping_varies_by_dest_ipv4
-        .or(r.mapping_varies_by_dest_ipv6);
-
-    match mapping_varies_by_dest {
-        Some(true) => NatType::Hard,
-        Some(false) => NatType::Medium,
-        None => NatType::Unknown,
-    }
 }
 
 async fn probe_relay_latency(url: &RelayUrl) -> RelayLatency {
@@ -367,7 +268,7 @@ async fn probe_relay_latency(url: &RelayUrl) -> RelayLatency {
     }
 }
 
-async fn probe_port_mapping() -> Result<String> {
+async fn probe_port_mapping() -> Result<PortMapProbe> {
     let config = portmapper::Config {
         enable_upnp: true,
         enable_pcp: true,
@@ -377,7 +278,11 @@ async fn probe_port_mapping() -> Result<String> {
     let client = portmapper::Client::new(config);
     let probe_rx = client.probe();
     let probe = probe_rx.await?.map_err(|e| anyhow::anyhow!(e))?;
-    Ok(format!("{probe}"))
+    Ok(PortMapProbe {
+        upnp: probe.upnp,
+        pcp: probe.pcp,
+        nat_pmp: probe.nat_pmp,
+    })
 }
 
 fn yn(b: bool) -> &'static str {
@@ -390,14 +295,6 @@ fn opt_bool(b: Option<bool>) -> &'static str {
         Some(false) => "no",
         None => "unknown",
     }
-}
-
-fn opt_addr_v4(a: Option<SocketAddrV4>) -> String {
-    a.map(|a| a.to_string()).unwrap_or_else(|| "none".into())
-}
-
-fn opt_addr_v6(a: Option<SocketAddrV6>) -> String {
-    a.map(|a| a.to_string()).unwrap_or_else(|| "none".into())
 }
 
 fn fmt_dur(d: Option<Duration>) -> String {
