@@ -17,6 +17,8 @@ use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
+#[cfg(feature = "net_diagnostics")]
+use crate::net_diagnostics::{DiagnosticsReport, diagnose};
 #[cfg(feature = "tickets")]
 use crate::protocol::{GetTicket, ListTickets, PublishTicket, TicketData, UnpublishTicket};
 use crate::{
@@ -49,6 +51,9 @@ use crate::{
 /// [`ApiSecret`]: crate::api_secret::ApiSecret
 #[derive(Debug)]
 pub struct Client {
+    // owned clone of the endpoint for diagnostics, and for conection restarts on actor close
+    #[allow(dead_code)]
+    endpoint: Endpoint,
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
     _actor_task: AbortOnDropHandle<()>,
 }
@@ -196,7 +201,7 @@ impl ClientBuilder {
         let remote = self.remote.ok_or(BuildError::MissingRemote)?;
         let capabilities = self.cap.ok_or(BuildError::MissingCapability)?;
 
-        let conn = IrohLazyRemoteConnection::new(self.endpoint, remote, ALPN.to_vec());
+        let conn = IrohLazyRemoteConnection::new(self.endpoint.clone(), remote, ALPN.to_vec());
         let client = N0desClient::boxed(conn);
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -212,6 +217,7 @@ impl ClientBuilder {
         ));
 
         Ok(Client {
+            endpoint: self.endpoint,
             message_channel: tx,
             _actor_task: metrics_task,
         })
@@ -291,6 +297,13 @@ impl Client {
         rx.await
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
             .map_err(Error::Remote)
+    }
+
+    #[cfg(feature = "net_diagnostics")]
+    pub async fn net_diagnostics(&self) -> DiagnosticsReport {
+        diagnose(&self.endpoint)
+            .await
+            .unwrap_or_else(|e| panic!("net_diagnostics failed: {e}"))
     }
 
     /// Publish a [ticket] to n0des so others can find it by calling fetch_tickets.

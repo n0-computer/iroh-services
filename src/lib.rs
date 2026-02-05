@@ -32,6 +32,8 @@ mod n0des;
 
 pub mod api_secret;
 pub mod caps;
+#[cfg(feature = "net_diagnostics")]
+pub mod net_diagnostics;
 pub mod protocol;
 #[cfg(feature = "simulation")]
 pub mod simulation;
