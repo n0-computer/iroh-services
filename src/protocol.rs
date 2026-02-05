@@ -29,6 +29,9 @@ pub enum N0desProtocol {
     TicketGet(GetTicket),
     #[rpc(tx=oneshot::Sender<RemoteResult<Vec<TicketData>>>)]
     TicketList(ListTickets),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    PutNetworkDiagnostics(PutNetworkDiagnostics),
 }
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
@@ -66,6 +69,18 @@ pub struct Ping {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Pong {
     pub req_id: [u8; 16],
+}
+
+// dummy type to make irpc happy
+#[cfg(not(feature = "net_diagnostics"))]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PutNetworkDiagnostics;
+
+/// Publishing network diagnostics
+#[cfg(feature = "net_diagnostics")]
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PutNetworkDiagnostics {
+    pub report: crate::net_diagnostics::DiagnosticsReport,
 }
 
 // dummy type to make irpc happy

@@ -21,7 +21,8 @@ async fn main() -> Result<()> {
         .await?;
 
     println!("Running network diagnostics...\n");
-    let report = client.net_diagnostics().await;
+    // pass true to upload the results to n0des
+    let report = client.net_diagnostics(false).await?;
     println!("{report}");
 
     endpoint.close().await;
