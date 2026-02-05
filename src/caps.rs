@@ -81,6 +81,8 @@ pub enum Cap {
     Metrics(MetricsCap),
     #[strum(to_string = "tickets:{0}")]
     Tickets(TicketsCap),
+    #[strum(to_string = "net-diagnostics:{0}")]
+    NetDiagnostics(NetDiagnosticsCap),
 }
 
 impl FromStr for Cap {
@@ -94,6 +96,7 @@ impl FromStr for Cap {
                 "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
                 "relay" => Self::Relay(RelayCap::from_str(inner)?),
                 "tickets" => Self::Tickets(TicketsCap::from_str(inner)?),
+                "net-diagnostics" => Self::NetDiagnostics(NetDiagnosticsCap::from_str(inner)?),
                 _ => bail!("invalid cap domain"),
             })
         } else {
@@ -119,6 +122,13 @@ cap_enum!(
         PutAny,
         GetAny,
         ListAny,
+    }
+);
+
+cap_enum!(
+    pub enum NetDiagnosticsCap {
+        PutAny,
+        GetAny,
     }
 );
 
@@ -180,6 +190,7 @@ impl Capability for Cap {
             (Cap::Relay(slf), Cap::Relay(other)) => slf.permits(other),
             (Cap::Metrics(slf), Cap::Metrics(other)) => slf.permits(other),
             (Cap::Tickets(slf), Cap::Tickets(other)) => slf.permits(other),
+            (Cap::NetDiagnostics(slf), Cap::NetDiagnostics(other)) => slf.permits(other),
             (_, _) => false,
         }
     }
@@ -192,6 +203,8 @@ fn client_capabilities(other: &Cap) -> bool {
         Cap::Relay(RelayCap::Use) => true,
         Cap::Metrics(MetricsCap::PutAny) => true,
         Cap::Tickets(_) => true,
+        Cap::NetDiagnostics(NetDiagnosticsCap::PutAny) => true,
+        Cap::NetDiagnostics(NetDiagnosticsCap::GetAny) => true,
     }
 }
 
@@ -217,6 +230,16 @@ impl Capability for TicketsCap {
             (TicketsCap::PutAny, TicketsCap::PutAny) => true,
             (TicketsCap::GetAny, TicketsCap::GetAny) => true,
             (TicketsCap::ListAny, TicketsCap::ListAny) => true,
+            (_, _) => false,
+        }
+    }
+}
+
+impl Capability for NetDiagnosticsCap {
+    fn permits(&self, other: &Self) -> bool {
+        match (self, other) {
+            (NetDiagnosticsCap::PutAny, NetDiagnosticsCap::PutAny) => true,
+            (NetDiagnosticsCap::GetAny, NetDiagnosticsCap::GetAny) => true,
             (_, _) => false,
         }
     }
