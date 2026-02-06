@@ -349,5 +349,49 @@ pub mod client_host {
             router.shutdown().await.unwrap();
             client_ep.close().await;
         }
+
+        #[tokio::test]
+        async fn test_client_host_rejects_non_allowed_endpoint() {
+            let lookup = MemoryLookup::new();
+            // create the "server" endpoint that will host the ClientHost
+            let server_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+                .address_lookup(lookup.clone())
+                .bind()
+                .await
+                .unwrap();
+
+            // create a client endpoint that is NOT in the allow list
+            let client_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+                .address_lookup(lookup.clone())
+                .bind()
+                .await
+                .unwrap();
+
+            // set up the ClientHost with an empty allow list
+            let host = ClientHost::new(&server_ep, vec![]);
+            let router = Router::builder(server_ep.clone())
+                .accept(ALPN.to_vec(), host)
+                .spawn();
+
+            let client_secret = client_ep.secret_key().clone();
+            let rcan = create_api_token_from_secret_key(
+                client_secret,
+                client_ep.id(),
+                Duration::from_secs(3600),
+                Caps::for_shared_secret(),
+            )
+            .unwrap();
+
+            let conn =
+                IrohLazyRemoteConnection::new(client_ep.clone(), server_ep.addr(), ALPN.to_vec());
+            let client = N0desClient::boxed(conn);
+
+            // the auth RPC should fail because the server rejects the connection
+            let result = client.rpc(Auth { caps: rcan }).await;
+            assert!(result.is_err(), "expected connection to be rejected");
+
+            router.shutdown().await.unwrap();
+            client_ep.close().await;
+        }
     }
 }
