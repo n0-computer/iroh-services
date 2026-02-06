@@ -126,3 +126,162 @@ impl From<PublishTicket> for TicketData {
         }
     }
 }
+
+#[cfg(feature = "client_host")]
+pub mod client_host {
+    use super::{Caps, N0desMessage, N0desProtocol, Pong, RemoteError};
+    use crate::caps::NetDiagnosticsCap;
+
+    use anyhow::{Result, bail, ensure};
+    use iroh::protocol::{AcceptError, ProtocolHandler};
+    use iroh::{Endpoint, EndpointId, endpoint::Connection};
+    use irpc::WithChannels;
+    use irpc_iroh::read_request;
+    use n0_error::{AnyError, e};
+    use rcan::{Capability, CapabilityOrigin, Rcan};
+    use tracing::{debug, warn};
+
+    #[derive(Debug)]
+    pub struct ClientHost {
+        // we allow this because the endpoint is used when the net_diagnostics
+        // feature is active
+        #[allow(dead_code)]
+        endpoint: Endpoint,
+        /// Set of endpoints that are allowed to dial
+        allow: Vec<EndpointId>,
+    }
+
+    impl ProtocolHandler for ClientHost {
+        async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+            let remote_id = connection.remote_id();
+            if !self.allow.contains(&remote_id) {
+                return Err(e!(AcceptError::NotAllowed));
+            }
+            self.handle_connection(connection).await.map_err(|e| {
+                let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
+                AcceptError::from(AnyError::from(boxed))
+            })
+        }
+    }
+
+    impl ClientHost {
+        /// Create a new client host with the given endpoint and allowed endpoints.
+        pub fn new(endpoint: &Endpoint, allow: Vec<EndpointId>) -> Self {
+            Self {
+                endpoint: endpoint.clone(),
+                allow,
+            }
+        }
+
+        async fn handle_connection(&self, connection: Connection) -> Result<()> {
+            let remote_node_id = connection.remote_id();
+            let Some(first_request) = read_request::<N0desProtocol>(&connection).await? else {
+                return Ok(());
+            };
+
+            let N0desMessage::Auth(WithChannels { inner, tx, .. }) = first_request else {
+                debug!(remote_node_id = %remote_node_id.fmt_short(), "Expected initial auth message");
+                connection.close(400u32.into(), b"Expected initial auth message");
+                return Ok(());
+            };
+            let rcan = inner.caps;
+            let capability = rcan.capability();
+
+            let res = self.verify_rcan(remote_node_id, &rcan).await;
+            match res {
+                Ok(()) => tx.send(()).await?,
+                Err(err) => {
+                    warn!("authentication failed: {err:?}");
+                    connection.close(401u32.into(), b"Unauthorized");
+                    return Ok(());
+                }
+            }
+
+            while let Some(request) = read_request::<N0desProtocol>(&connection).await? {
+                tracing::debug!("received RPC request");
+                self.handle_request(&connection, remote_node_id, capability, request)
+                    .await?;
+            }
+            connection.closed().await;
+            Ok(())
+        }
+
+        async fn handle_request(
+            &self,
+            connection: &Connection,
+            remote_node_id: EndpointId,
+            capability: &Caps,
+            request: N0desMessage,
+        ) -> Result<(), anyhow::Error> {
+            debug!(remote_node_id = %remote_node_id.fmt_short(), "handle RPC request");
+            match request {
+                N0desMessage::Auth(_) => {
+                    connection.close(400u32.into(), b"Unexpected auth message");
+                    bail!("unexpected auth message");
+                }
+                N0desMessage::Ping(msg) => {
+                    let WithChannels { inner, tx, .. } = msg;
+                    let req_id = inner.req_id;
+                    tx.send(Pong { req_id }).await?;
+                }
+                N0desMessage::RunNetworkDiagnostics(msg) => {
+                    let WithChannels { tx, .. } = msg;
+                    let needed_caps = Caps::new([NetDiagnosticsCap::GetAny]);
+                    if !capability.permits(&needed_caps) {
+                        return send_missing_caps(tx, needed_caps).await;
+                    }
+
+                    #[cfg(not(feature = "net_diagnostics"))]
+                    {
+                        tx.send(Err(RemoteError::AuthError(
+                            "this endpoint does not support running remote diagnostics".to_string(),
+                        )))
+                        .await?;
+                    }
+
+                    #[cfg(feature = "net_diagnostics")]
+                    {
+                        let report =
+                            crate::net_diagnostics::run_diagnostics(&self.endpoint).await?;
+                        tx.send(Ok(report)).await.inspect_err(|e| {
+                            warn!("sending network diagnostics response: {:?}", e)
+                        })?;
+                    }
+                }
+                _ => {
+                    bail!("unsupported message type");
+                }
+            }
+            Ok(())
+        }
+
+        async fn verify_rcan(&self, remote_node: EndpointId, rcan: &Rcan<Caps>) -> Result<()> {
+            // Issuer must match the cap_key
+            ensure!(
+                matches!(rcan.capability_origin(), CapabilityOrigin::Issuer),
+                "invalid issuer"
+            );
+
+            // Audience must be this endpoint
+            ensure!(
+                EndpointId::try_from(rcan.audience().as_bytes())
+                    .map(|id| id == remote_node)
+                    .unwrap_or(false),
+                "invalid audience"
+            );
+
+            // // The issuer of the capability must be a registered ssh key
+            // let issuer = rcan.issuer();
+            Ok(())
+        }
+    }
+
+    async fn send_missing_caps<T>(
+        tx: irpc::channel::oneshot::Sender<Result<T, RemoteError>>,
+        missing_caps: Caps,
+    ) -> Result<()> {
+        tx.send(Err(RemoteError::MissingCapability(missing_caps)))
+            .await?;
+        Ok(())
+    }
+}

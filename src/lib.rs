@@ -37,10 +37,13 @@ pub mod protocol;
 pub use anyhow;
 pub use iroh_metrics::Registry;
 
+#[cfg(feature = "client_host")]
+pub use protocol::client_host::ClientHost;
+
 #[cfg(feature = "tickets")]
 pub use self::client::PublishedTicket;
 pub use self::{
     api_secret::ApiSecret,
-    client::{Client, ClientBuilder},
+    client::{API_SECRET_ENV_VAR_NAME, Client, ClientBuilder},
     protocol::ALPN,
 };

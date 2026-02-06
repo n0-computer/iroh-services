@@ -58,6 +58,7 @@ tokio = { version = "1.45", features = ["macros", "rt", "rt-multi-thread"] }
 [features]
 default = ["client"]
 client = []
+client_host = []
 tickets = []
 net_diagnostics = ["dep:iroh-relay", "dep:portmapper"]
 ssh-key = [

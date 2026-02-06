@@ -1,5 +1,4 @@
 use std::{
-    env::VarError,
     str::FromStr,
     sync::{Arc, RwLock},
 };
@@ -18,7 +17,7 @@ use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 #[cfg(feature = "net_diagnostics")]
-use crate::net_diagnostics::{DiagnosticsReport, diagnose};
+use crate::net_diagnostics::{DiagnosticsReport, run_diagnostics};
 #[cfg(feature = "net_diagnostics")]
 use crate::protocol::PutNetworkDiagnostics;
 #[cfg(feature = "tickets")]
@@ -73,7 +72,7 @@ pub struct ClientBuilder {
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
-const API_SECRET_ENV_VAR_NAME: &str = "N0DES_API_SECRET";
+pub const API_SECRET_ENV_VAR_NAME: &str = "N0DES_API_SECRET";
 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
@@ -114,20 +113,8 @@ impl ClientBuilder {
 
     /// Check N0DES_API_SECRET environment variable for a valid API secret
     pub fn api_secret_from_env(self) -> Result<Self> {
-        match std::env::var(API_SECRET_ENV_VAR_NAME) {
-            Ok(ticket_string) => {
-                let ticket = ApiSecret::from_str(&ticket_string)
-                    .context("invalid {API_SECRET_ENV_VAR_NAME}")?;
-                self.api_secret(ticket)
-            }
-            Err(VarError::NotPresent) => Err(anyhow!(
-                "{API_SECRET_ENV_VAR_NAME} environment variable is not set"
-            )),
-            Err(VarError::NotUnicode(e)) => Err(anyhow!(
-                "{API_SECRET_ENV_VAR_NAME} environment variable is not valid unicode: {:?}",
-                e
-            )),
-        }
+        let ticket = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
+        self.api_secret(ticket)
     }
 
     /// set client API secret from an encoded string
@@ -304,7 +291,7 @@ impl Client {
     /// run local network status diagnostics, optionally uploading the results
     #[cfg(feature = "net_diagnostics")]
     pub async fn net_diagnostics(&self, send: bool) -> Result<DiagnosticsReport, Error> {
-        let report = diagnose(&self.endpoint).await?;
+        let report = run_diagnostics(&self.endpoint).await?;
         if send {
             let (tx, rx) = oneshot::channel();
             self.message_channel

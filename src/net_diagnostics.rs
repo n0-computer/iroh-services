@@ -3,6 +3,7 @@
 //! Collects a full network diagnostics report from an existing iroh Endpoint
 //! covering UDP connectivity, relay latency, and port mapping protocol
 //! availability.
+#[cfg(not(feature = "net_diagnostics"))]
 use serde::{Deserialize, Serialize};
 
 /// This is a stand-in so we can refer to diagnostic reports in the RPC wire
@@ -12,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub struct DiagnosticsReport;
 
 #[cfg(feature = "net_diagnostics")]
-pub use self::diagnostics::{DiagnosticsReport, diagnose};
+pub use self::diagnostics::{DiagnosticsReport, run_diagnostics};
 
 #[cfg(feature = "net_diagnostics")]
 mod diagnostics {
@@ -136,12 +137,12 @@ mod diagnostics {
     }
 
     /// Run full network diagnostics on an existing endpoint. 10s timeout.
-    pub async fn diagnose(endpoint: &Endpoint) -> Result<DiagnosticsReport> {
-        diagnose_with_timeout(endpoint, Duration::from_secs(10)).await
+    pub async fn run_diagnostics(endpoint: &Endpoint) -> Result<DiagnosticsReport> {
+        run_diagnostics_with_timeout(endpoint, Duration::from_secs(10)).await
     }
 
     /// Run full network diagnostics with a custom timeout for net report init.
-    async fn diagnose_with_timeout(
+    async fn run_diagnostics_with_timeout(
         endpoint: &Endpoint,
         timeout: Duration,
     ) -> Result<DiagnosticsReport> {
@@ -323,12 +324,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_diagnose() {
+    async fn test_run_diagnostics() {
         let endpoint = iroh::Endpoint::empty_builder(iroh::RelayMode::Disabled)
             .bind()
             .await
             .unwrap();
-        let report = diagnose(&endpoint).await.unwrap();
+        let report = run_diagnostics(&endpoint).await.unwrap();
         println!("{report}");
         endpoint.close().await;
     }
