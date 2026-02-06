@@ -284,4 +284,70 @@ pub mod client_host {
             .await?;
         Ok(())
     }
+
+    #[cfg(test)]
+    #[cfg(feature = "net_diagnostics")]
+    mod tests {
+        use super::*;
+        use crate::caps::{Caps, create_api_token_from_secret_key};
+        use crate::protocol::{ALPN, Auth, N0desClient, RunNetworkDiagnostics};
+        use iroh::RelayMode;
+        use iroh::address_lookup::MemoryLookup;
+        use iroh::protocol::Router;
+        use irpc_iroh::IrohLazyRemoteConnection;
+        use n0_future::time::Duration;
+
+        #[tokio::test]
+        async fn test_client_host_run_diagnostics() {
+            let lookup = MemoryLookup::new();
+            // create the "server" endpoint that will host the ClientHost
+            let server_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+                .address_lookup(lookup.clone())
+                .bind()
+                .await
+                .unwrap();
+
+            // create the "client" endpoint that will dial the server
+            let client_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+                .address_lookup(lookup.clone())
+                .bind()
+                .await
+                .unwrap();
+
+            // set up the ClientHost on the server, allowing the client to connect
+            let host = ClientHost::new(&server_ep, vec![client_ep.id()]);
+            let router = Router::builder(server_ep.clone())
+                .accept(ALPN.to_vec(), host)
+                .spawn();
+
+            // build an RCAN: issuer is a secret key whose public half equals
+            // the client endpoint id; audience is the client endpoint id (the
+            // server's verify_rcan checks audience == remote_node_id)
+            let client_secret = client_ep.secret_key().clone();
+            let rcan = create_api_token_from_secret_key(
+                client_secret,
+                client_ep.id(),
+                Duration::from_secs(3600),
+                Caps::for_shared_secret(),
+            )
+            .unwrap();
+
+            // connect the client to the server over the n0des ALPN
+            let conn =
+                IrohLazyRemoteConnection::new(client_ep.clone(), server_ep.addr(), ALPN.to_vec());
+            let client = N0desClient::boxed(conn);
+
+            // authenticate
+            client.rpc(Auth { caps: rcan }).await.unwrap();
+
+            // send RunNetworkDiagnostics and verify we get a report back
+            let result = client.rpc(RunNetworkDiagnostics).await.unwrap();
+            let report = result.expect("expected Ok(DiagnosticsReport)");
+            assert_eq!(report.endpoint_id, server_ep.id());
+
+            // clean up
+            router.shutdown().await.unwrap();
+            client_ep.close().await;
+        }
+    }
 }
