@@ -68,34 +68,8 @@ pub struct Pong {
     pub req_id: [u8; 16],
 }
 
-// dummy type to make irpc happy
-#[cfg(not(feature = "tickets"))]
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PublishTicket;
-
-// dummy type to make irpc happy
-#[cfg(not(feature = "tickets"))]
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetTicket;
-
-// dummy type to make irpc happy
-#[cfg(not(feature = "tickets"))]
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UnpublishTicket;
-
-// dummy type to make irpc happy
-#[cfg(not(feature = "tickets"))]
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ListTickets;
-
-// dummy type to make irpc happy
-#[cfg(not(feature = "tickets"))]
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TicketData;
-
 /// Publishing a ticket allows n0des to act as a central hub to ferry tickets
 /// between endpoints.
-#[cfg(feature = "tickets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PublishTicket {
     pub req_id: [u8; 16],
@@ -106,7 +80,6 @@ pub struct PublishTicket {
 
 /// wire-level request to remove a ticket. Useful for undos, and any situation
 /// where the uptime of the endpoint outlasts the utility of the ticket.
-#[cfg(feature = "tickets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UnpublishTicket {
     pub req_id: [u8; 16],
@@ -115,7 +88,6 @@ pub struct UnpublishTicket {
 }
 
 /// wire-level request get a ticket by name.
-#[cfg(feature = "tickets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GetTicket {
     pub req_id: [u8; 16],
@@ -124,7 +96,6 @@ pub struct GetTicket {
 }
 
 /// Wire format for requesting a list of tickets
-#[cfg(feature = "tickets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ListTickets {
     pub req_id: [u8; 16],
@@ -134,7 +105,6 @@ pub struct ListTickets {
 }
 
 /// Signals are opaque data that n0des can ferry between endpoints
-#[cfg(feature = "tickets")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TicketData {
     pub name: String,
@@ -142,7 +112,6 @@ pub struct TicketData {
     pub ticket_bytes: Vec<u8>,
 }
 
-#[cfg(feature = "tickets")]
 impl From<PublishTicket> for TicketData {
     fn from(msg: PublishTicket) -> Self {
         TicketData {
