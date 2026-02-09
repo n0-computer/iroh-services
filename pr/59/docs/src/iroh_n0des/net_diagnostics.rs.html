@@ -214,7 +214,7 @@
 <a href=#214 id=214 data-nosnippet>214</a><span class="attr">#[cfg(test)]
 <a href=#215 id=215 data-nosnippet>215</a>#[cfg(feature = <span class="string">"net_diagnostics"</span>)]
 <a href=#216 id=216 data-nosnippet>216</a></span><span class="kw">mod </span>tests {
-<a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">use </span>super::<span class="kw-2">*</span>;
+<a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">use </span><span class="kw">crate</span>::run_diagnostics;
 <a href=#218 id=218 data-nosnippet>218</a>
 <a href=#219 id=219 data-nosnippet>219</a>    <span class="attr">#[tokio::test]
 <a href=#220 id=220 data-nosnippet>220</a>    </span><span class="kw">async fn </span>test_run_diagnostics() {
@@ -223,8 +223,7 @@
 <a href=#223 id=223 data-nosnippet>223</a>            .<span class="kw">await
 <a href=#224 id=224 data-nosnippet>224</a>            </span>.unwrap();
 <a href=#225 id=225 data-nosnippet>225</a>        <span class="kw">let </span>report = run_diagnostics(<span class="kw-2">&amp;</span>endpoint).<span class="kw">await</span>.unwrap();
-<a href=#226 id=226 data-nosnippet>226</a>        <span class="macro">println!</span>(<span class="string">"{report}"</span>);
-<a href=#227 id=227 data-nosnippet>227</a>        endpoint.close().<span class="kw">await</span>;
-<a href=#228 id=228 data-nosnippet>228</a>    }
-<a href=#229 id=229 data-nosnippet>229</a>}
+<a href=#226 id=226 data-nosnippet>226</a>        endpoint.close().<span class="kw">await</span>;
+<a href=#227 id=227 data-nosnippet>227</a>    }
+<a href=#228 id=228 data-nosnippet>228</a>}
 </code></pre></div></section></main></body></html>
