@@ -42,7 +42,7 @@ pub mod checks {
     };
 
     use anyhow::Result;
-    use iroh::{Endpoint, RelayUrl, SecretKey, Watcher, dns::DnsResolver};
+    use iroh::{Endpoint, RelayUrl, Watcher};
     use iroh_relay::protos::relay::{ClientToRelayMsg, RelayToClientMsg};
     use n0_future::{SinkExt, StreamExt};
 
@@ -87,7 +87,7 @@ pub mod checks {
         let relay_fut = async {
             let mut results = Vec::new();
             for url in &relay_urls {
-                results.push(probe_relay_latency(url).await);
+                results.push(probe_relay_latency(endpoint, url).await);
             }
             results
         };
@@ -117,10 +117,12 @@ pub mod checks {
         })
     }
 
-    async fn probe_relay_latency(url: &RelayUrl) -> RelayLatency {
-        let key = SecretKey::generate(&mut rand::rng());
-        let dns = DnsResolver::new();
-        let builder = iroh_relay::client::ClientBuilder::new(url.clone(), key, dns);
+    async fn probe_relay_latency(endpoint: &Endpoint, url: &RelayUrl) -> RelayLatency {
+        let builder = iroh_relay::client::ClientBuilder::new(
+            url.clone(),
+            endpoint.secret_key().clone(),
+            endpoint.dns_resolver().clone(),
+        );
 
         let start = Instant::now();
         let client = match tokio::time::timeout(Duration::from_secs(3), builder.connect()).await {
