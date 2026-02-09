@@ -1,2 +1,2 @@
-createSrcSidebar('[["iroh_n0des",["",[["simulation",[],["events.rs","proto.rs","trace.rs"]]],["api_secret.rs","caps.rs","client.rs","lib.rs","n0des.rs","net_diagnostics.rs","protocol.rs","simulation.rs"]]],["iroh_n0des_macro",["",[],["lib.rs"]]]]');
-//{"start":19,"fragment_lengths":[186,40]}
+createSrcSidebar('[["iroh_n0des",["",[],["api_secret.rs","caps.rs","client.rs","lib.rs","net_diagnostics.rs","protocol.rs"]]]]');
+//{"start":19,"fragment_lengths":[106]}

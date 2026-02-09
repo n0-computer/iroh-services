@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"attr":["sim"],"constant":["API_SECRET_ENV_VAR_NAME"],"mod":["api_secret","caps","net_diagnostics","protocol","simulation"],"struct":["Client","ClientBuilder","PublishedTicket","Registry"],"trait":["N0de"]};
+window.SIDEBAR_ITEMS = {"constant":["API_SECRET_ENV_VAR_NAME"],"mod":["api_secret","caps","net_diagnostics","protocol"],"struct":["Client","ClientBuilder","PublishedTicket","Registry"]};
