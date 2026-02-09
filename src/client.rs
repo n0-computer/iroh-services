@@ -50,13 +50,13 @@ use crate::{
 /// ```
 ///
 /// [`ApiSecret`]: crate::api_secret::ApiSecret
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Client {
     // owned clone of the endpoint for diagnostics, and for conection restarts on actor close
     #[allow(dead_code)]
     endpoint: Endpoint,
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
-    _actor_task: AbortOnDropHandle<()>,
+    _actor_task: Arc<AbortOnDropHandle<()>>,
 }
 
 /// ClientBuilder provides configures and builds a n0des client, typically
@@ -208,7 +208,7 @@ impl ClientBuilder {
         Ok(Client {
             endpoint: self.endpoint,
             message_channel: tx,
-            _actor_task: metrics_task,
+            _actor_task: Arc::new(metrics_task),
         })
     }
 }
@@ -288,6 +288,36 @@ impl Client {
             .map_err(Error::Remote)
     }
 
+    /// Grant capabilities to a remote endpoint. Creates a signed RCAN token
+    /// and sends it to n0des for storage. The remote can then use this token
+    /// when dialing back to authorize its requests.
+    #[cfg(feature = "client_host")]
+    pub async fn grant_capability(
+        &self,
+        remote_id: EndpointId,
+        caps: impl IntoIterator<Item = impl Into<crate::caps::Cap>>,
+    ) -> Result<(), Error> {
+        let cap = crate::caps::create_grant_token(
+            self.endpoint.secret_key().clone(),
+            remote_id,
+            DEFAULT_CAP_EXPIRY,
+            Caps::new(caps),
+        )
+        .map_err(Error::Other)?;
+
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::GrantCap {
+                cap: Box::new(cap),
+                done: tx,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("granting capability")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+    }
+
     /// run local network status diagnostics, optionally uploading the results
     #[cfg(feature = "net_diagnostics")]
     pub async fn net_diagnostics(&self, send: bool) -> Result<DiagnosticsReport, Error> {
@@ -297,7 +327,7 @@ impl Client {
             self.message_channel
                 .send(ClientActorMessage::PutNetworkDiagnostics {
                     done: tx,
-                    report: report.clone(),
+                    report: Box::new(report.clone()),
                 })
                 .await
                 .map_err(|_| Error::Other(anyhow!("sending network diagnostics report")))?;
@@ -449,9 +479,14 @@ enum ClientActorMessage {
     Ping {
         done: oneshot::Sender<Result<Pong, RemoteError>>,
     },
+    GrantCap {
+        // boxed to avoid large enum variants
+        cap: Box<Rcan<Caps>>,
+        done: oneshot::Sender<Result<(), Error>>,
+    },
     #[cfg(feature = "net_diagnostics")]
     PutNetworkDiagnostics {
-        report: DiagnosticsReport,
+        report: Box<DiagnosticsReport>,
         done: oneshot::Sender<Result<(), Error>>,
     },
     #[cfg(feature = "tickets")]
@@ -531,9 +566,15 @@ impl ClientActor {
                                 self.authorized = false;
                             }
                         }
+                        ClientActorMessage::GrantCap{ cap, done } => {
+                            let res = self.grant_cap(*cap).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to grant capability: {:#?}", err);
+                            }
+                        }
                         #[cfg(feature = "net_diagnostics")]
                         ClientActorMessage::PutNetworkDiagnostics{ report, done } => {
-                            let res = self.put_network_diagnostics(report).await;
+                            let res = self.put_network_diagnostics(*report).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to publish network diagnostics: {:#?}", err);
                             }
@@ -627,6 +668,18 @@ impl ClientActor {
 
         self.client
             .rpc(req)
+            .await
+            .map_err(|_| RemoteError::InternalServerError)??;
+
+        Ok(())
+    }
+
+    async fn grant_cap(&mut self, cap: Rcan<Caps>) -> Result<(), Error> {
+        trace!("client actor grant capability");
+        self.auth().await?;
+
+        self.client
+            .rpc(crate::protocol::GrantCap { cap })
             .await
             .map_err(|_| RemoteError::InternalServerError)??;
 

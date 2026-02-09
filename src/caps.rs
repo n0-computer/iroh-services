@@ -336,6 +336,22 @@ pub fn create_api_token_from_ssh_key(
     Ok(can)
 }
 
+/// Create an rcan token that grants capabilities to a remote endpoint.
+/// The local endpoint is the issuer (granter), and the remote endpoint is the
+/// audience (grantee).
+pub fn create_grant_token(
+    local_secret: SecretKey,
+    remote_id: EndpointId,
+    max_age: Duration,
+    capability: Caps,
+) -> Result<Rcan<Caps>> {
+    let issuer = ed25519_dalek::SigningKey::from_bytes(&local_secret.to_bytes());
+    let audience = remote_id.as_verifying_key();
+    let can =
+        Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
+    Ok(can)
+}
+
 /// Create an rcan token for the api access from an iroh secret key
 pub fn create_api_token_from_secret_key(
     private_key: SecretKey,

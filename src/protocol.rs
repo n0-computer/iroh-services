@@ -35,6 +35,9 @@ pub enum N0desProtocol {
     RunNetworkDiagnostics(RunNetworkDiagnostics),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     PutNetworkDiagnostics(PutNetworkDiagnostics),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    GrantCap(GrantCap),
 }
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
@@ -140,6 +143,13 @@ pub struct PutNetworkDiagnostics {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RunNetworkDiagnostics;
 
+/// Grant a capability token to the remote endpoint. The remote should store
+/// the RCAN and use it when dialing back to authorize its requests.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GrantCap {
+    pub cap: Rcan<Caps>,
+}
+
 #[cfg(feature = "client_host")]
 pub mod client_host {
     use super::{Caps, N0desMessage, N0desProtocol, Pong, RemoteError};
@@ -150,26 +160,17 @@ pub mod client_host {
     use iroh::{Endpoint, EndpointId, endpoint::Connection};
     use irpc::WithChannels;
     use irpc_iroh::read_request;
-    use n0_error::{AnyError, e};
+    use n0_error::AnyError;
     use rcan::{Capability, CapabilityOrigin, Rcan};
     use tracing::{debug, warn};
 
     #[derive(Debug)]
     pub struct ClientHost {
-        // we allow this because the endpoint is used when the net_diagnostics
-        // feature is active
-        #[allow(dead_code)]
         endpoint: Endpoint,
-        /// Set of endpoints that are allowed to dial
-        allow: Vec<EndpointId>,
     }
 
     impl ProtocolHandler for ClientHost {
         async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
-            let remote_id = connection.remote_id();
-            if !self.allow.contains(&remote_id) {
-                return Err(e!(AcceptError::NotAllowed));
-            }
             self.handle_connection(connection).await.map_err(|e| {
                 let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
                 AcceptError::from(AnyError::from(boxed))
@@ -178,11 +179,12 @@ pub mod client_host {
     }
 
     impl ClientHost {
-        /// Create a new client host with the given endpoint and allowed endpoints.
-        pub fn new(endpoint: &Endpoint, allow: Vec<EndpointId>) -> Self {
+        /// Create a new client host for the given endpoint. Incoming
+        /// connections are authorized by verifying that the first Auth
+        /// message contains an RCAN issued by this endpoint.
+        pub fn new(endpoint: &Endpoint) -> Self {
             Self {
                 endpoint: endpoint.clone(),
-                allow,
             }
         }
 
@@ -261,6 +263,12 @@ pub mod client_host {
                         })?;
                     }
                 }
+                N0desMessage::GrantCap(msg) => {
+                    let WithChannels { tx, .. } = msg;
+                    // ACK receipt. Server-side storage of granted caps is
+                    // handled by the n0des service, not the client host.
+                    tx.send(Ok(())).await?;
+                }
                 _ => {
                     bail!("unsupported message type");
                 }
@@ -269,22 +277,28 @@ pub mod client_host {
         }
 
         async fn verify_rcan(&self, remote_node: EndpointId, rcan: &Rcan<Caps>) -> Result<()> {
-            // Issuer must match the cap_key
+            // Must be a first-party token (not delegated)
             ensure!(
                 matches!(rcan.capability_origin(), CapabilityOrigin::Issuer),
-                "invalid issuer"
+                "invalid capability origin: expected first-party token"
             );
 
-            // Audience must be this endpoint
+            // Issuer must be this endpoint (we issued this grant)
+            ensure!(
+                EndpointId::try_from(rcan.issuer().as_bytes())
+                    .map(|id| id == self.endpoint.id())
+                    .unwrap_or(false),
+                "invalid issuer: RCAN was not issued by this endpoint"
+            );
+
+            // Audience must be the remote node (the token is for them)
             ensure!(
                 EndpointId::try_from(rcan.audience().as_bytes())
                     .map(|id| id == remote_node)
                     .unwrap_or(false),
-                "invalid audience"
+                "invalid audience: RCAN audience does not match remote node"
             );
 
-            // // The issuer of the capability must be a registered ssh key
-            // let issuer = rcan.issuer();
             Ok(())
         }
     }
@@ -302,7 +316,7 @@ pub mod client_host {
     #[cfg(feature = "net_diagnostics")]
     mod tests {
         use super::*;
-        use crate::caps::{Caps, create_api_token_from_secret_key};
+        use crate::caps::{Caps, create_grant_token};
         use crate::protocol::{ALPN, Auth, N0desClient, RunNetworkDiagnostics};
         use iroh::RelayMode;
         use iroh::address_lookup::MemoryLookup;
@@ -313,44 +327,39 @@ pub mod client_host {
         #[tokio::test]
         async fn test_client_host_run_diagnostics() {
             let lookup = MemoryLookup::new();
-            // create the "server" endpoint that will host the ClientHost
             let server_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
                 .address_lookup(lookup.clone())
                 .bind()
                 .await
                 .unwrap();
 
-            // create the "client" endpoint that will dial the server
             let client_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
                 .address_lookup(lookup.clone())
                 .bind()
                 .await
                 .unwrap();
 
-            // set up the ClientHost on the server, allowing the client to connect
-            let host = ClientHost::new(&server_ep, vec![client_ep.id()]);
+            let host = ClientHost::new(&server_ep);
             let router = Router::builder(server_ep.clone())
                 .accept(ALPN.to_vec(), host)
                 .spawn();
 
-            // build an RCAN: issuer is a secret key whose public half equals
-            // the client endpoint id; audience is the client endpoint id (the
-            // server's verify_rcan checks audience == remote_node_id)
-            let client_secret = client_ep.secret_key().clone();
-            let rcan = create_api_token_from_secret_key(
-                client_secret,
+            // The server grants capabilities to the client. The RCAN is
+            // issued by the server (issuer = server secret key) with the
+            // client as the audience.
+            let rcan = create_grant_token(
+                server_ep.secret_key().clone(),
                 client_ep.id(),
                 Duration::from_secs(3600),
                 Caps::for_shared_secret(),
             )
             .unwrap();
 
-            // connect the client to the server over the n0des ALPN
             let conn =
                 IrohLazyRemoteConnection::new(client_ep.clone(), server_ep.addr(), ALPN.to_vec());
             let client = N0desClient::boxed(conn);
 
-            // authenticate
+            // authenticate with the server-issued grant
             client.rpc(Auth { caps: rcan }).await.unwrap();
 
             // send RunNetworkDiagnostics and verify we get a report back
@@ -358,37 +367,35 @@ pub mod client_host {
             let report = result.expect("expected Ok(DiagnosticsReport)");
             assert_eq!(report.endpoint_id, server_ep.id());
 
-            // clean up
             router.shutdown().await.unwrap();
             client_ep.close().await;
         }
 
         #[tokio::test]
-        async fn test_client_host_rejects_non_allowed_endpoint() {
+        async fn test_client_host_rejects_self_signed_rcan() {
             let lookup = MemoryLookup::new();
-            // create the "server" endpoint that will host the ClientHost
             let server_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
                 .address_lookup(lookup.clone())
                 .bind()
                 .await
                 .unwrap();
 
-            // create a client endpoint that is NOT in the allow list
             let client_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
                 .address_lookup(lookup.clone())
                 .bind()
                 .await
                 .unwrap();
 
-            // set up the ClientHost with an empty allow list
-            let host = ClientHost::new(&server_ep, vec![]);
+            let host = ClientHost::new(&server_ep);
             let router = Router::builder(server_ep.clone())
                 .accept(ALPN.to_vec(), host)
                 .spawn();
 
-            let client_secret = client_ep.secret_key().clone();
-            let rcan = create_api_token_from_secret_key(
-                client_secret,
+            // Client creates its own RCAN (self-signed, not issued by server).
+            // This should be rejected because the issuer doesn't match the
+            // server endpoint.
+            let rcan = create_grant_token(
+                client_ep.secret_key().clone(),
                 client_ep.id(),
                 Duration::from_secs(3600),
                 Caps::for_shared_secret(),
@@ -399,9 +406,12 @@ pub mod client_host {
                 IrohLazyRemoteConnection::new(client_ep.clone(), server_ep.addr(), ALPN.to_vec());
             let client = N0desClient::boxed(conn);
 
-            // the auth RPC should fail because the server rejects the connection
+            // auth should fail because the RCAN issuer is the client, not the server
             let result = client.rpc(Auth { caps: rcan }).await;
-            assert!(result.is_err(), "expected connection to be rejected");
+            assert!(
+                result.is_err(),
+                "expected auth to be rejected for self-signed RCAN"
+            );
 
             router.shutdown().await.unwrap();
             client_ep.close().await;

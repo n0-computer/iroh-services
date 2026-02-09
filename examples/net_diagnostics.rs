@@ -11,7 +11,9 @@
 //! Run with: cargo run --features=net_diagnostics,client_host --example net_diagnostics
 use anyhow::Result;
 use iroh::{Endpoint, protocol::Router};
-use iroh_n0des::{ALPN, API_SECRET_ENV_VAR_NAME, ApiSecret, Client, ClientHost};
+use iroh_n0des::{
+    ALPN, API_SECRET_ENV_VAR_NAME, ApiSecret, Client, ClientHost, caps::NetDiagnosticsCap,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,12 +31,25 @@ async fn main() -> Result<()> {
         .build()
         .await?;
 
-    // 4. Set up a ClientHost so n0des can dial *back* into this endpoint.
-    //    The allow-list restricts accepted connections to the n0des service
-    //    endpoint extracted from the ApiSecret.
-    let host = ClientHost::new(&endpoint, vec![secret.addr().id]);
+    // 4. grant the abillity to get diagnostics to the remote EndpointID associated
+    //    with our project on n0des. This will create a capability token, send it to
+    //    the remote for storage & confirm receipt. We do this in a task to avoid
+    //    blocking the local node startup in the rare case that remote endpoint is
+    //    down when this process starts.
+    let client2 = client.clone();
+    let remote_id = secret.addr().id.clone();
+    tokio::spawn(async move {
+        client2
+            .grant_capability(remote_id, vec![NetDiagnosticsCap::GetAny])
+            .await
+            .unwrap();
+    });
 
-    // 5. Register the ClientHost on the n0des ALPN and spawn the router.
+    // 5. Set up a ClientHost so n0des can dial *back* into this endpoint.
+    //    Incoming connections must present an RCAN issued by this endpoint.
+    let host = ClientHost::new(&endpoint);
+
+    // 6. Register the ClientHost on the n0des ALPN and spawn the router.
     //    Once running, n0des can open connections to this endpoint and send
     //    RPC requests such as RunNetworkDiagnostics.
     let router = Router::builder(endpoint)

@@ -214,7 +214,7 @@ pub mod checks {
 #[cfg(test)]
 #[cfg(feature = "net_diagnostics")]
 mod tests {
-    use super::*;
+    use crate::run_diagnostics;
 
     #[tokio::test]
     async fn test_run_diagnostics() {
@@ -223,7 +223,6 @@ mod tests {
             .await
             .unwrap();
         let report = run_diagnostics(&endpoint).await.unwrap();
-        println!("{report}");
         endpoint.close().await;
     }
 }
