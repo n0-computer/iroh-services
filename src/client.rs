@@ -17,7 +17,7 @@ use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 #[cfg(feature = "net_diagnostics")]
-use crate::net_diagnostics::{DiagnosticsReport, run_diagnostics};
+use crate::net_diagnostics::{DiagnosticsReport, checks::run_diagnostics};
 #[cfg(feature = "net_diagnostics")]
 use crate::protocol::PutNetworkDiagnostics;
 #[cfg(feature = "tickets")]

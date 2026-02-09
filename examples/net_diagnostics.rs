@@ -44,9 +44,9 @@ async fn main() -> Result<()> {
     // 6. Run diagnostics locally (pass true to also upload results to n0des).
     println!("Running network diagnostics...\n");
     let report = client.net_diagnostics(false).await?;
-    println!("{report}");
+    println!("{:?}", report);
 
-    println!("waiting");
+    println!("waiting for remote diagnostics requests. ctrl+c to exit.");
     tokio::signal::ctrl_c().await?;
     router.endpoint().close().await;
     Ok(())

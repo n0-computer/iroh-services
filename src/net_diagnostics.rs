@@ -3,138 +3,50 @@
 //! Collects a full network diagnostics report from an existing iroh Endpoint
 //! covering UDP connectivity, relay latency, and port mapping protocol
 //! availability.
-#[cfg(not(feature = "net_diagnostics"))]
+use std::{net::SocketAddr, time::Duration};
+
+use iroh::{NetReport, RelayUrl};
 use serde::{Deserialize, Serialize};
 
-/// This is a stand-in so we can refer to diagnostic reports in the RPC wire
-/// protocol, even when the net_diagnostics feature is disabled.
-#[cfg(not(feature = "net_diagnostics"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiagnosticsReport;
+pub struct DiagnosticsReport {
+    pub endpoint_id: iroh::EndpointId,
+    pub net_report: Option<NetReport>,
+    pub direct_addrs: Vec<SocketAddr>,
+    pub relay_latencies: Vec<RelayLatency>,
+    pub portmap_probe: Option<PortMapProbe>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelayLatency {
+    pub url: RelayUrl,
+    pub connect_time: Option<Duration>,
+    pub ping_latency: Option<Duration>,
+    pub error: Option<String>,
+}
+
+/// Port mapping protocol availability on the LAN.
+/// This can be avoided if we make the original port mapping probe return a serde-able struct.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortMapProbe {
+    pub upnp: bool,
+    pub pcp: bool,
+    pub nat_pmp: bool,
+}
 
 #[cfg(feature = "net_diagnostics")]
-pub use self::diagnostics::{DiagnosticsReport, run_diagnostics};
-
-#[cfg(feature = "net_diagnostics")]
-mod diagnostics {
+pub mod checks {
     use std::{
-        fmt,
         net::SocketAddr,
         time::{Duration, Instant},
     };
 
     use anyhow::Result;
-    use iroh::{Endpoint, NetReport, RelayUrl, SecretKey, Watcher, dns::DnsResolver};
+    use iroh::{Endpoint, RelayUrl, SecretKey, Watcher, dns::DnsResolver};
     use iroh_relay::protos::relay::{ClientToRelayMsg, RelayToClientMsg};
     use n0_future::{SinkExt, StreamExt};
-    use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct RelayLatency {
-        pub url: RelayUrl,
-        pub connect_time: Option<Duration>,
-        pub ping_latency: Option<Duration>,
-        pub error: Option<String>,
-    }
-
-    /// Port mapping protocol availability on the LAN.
-    /// This can be avoided if we make the original port mapping probe return a serde-able struct.
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct PortMapProbe {
-        pub upnp: bool,
-        pub pcp: bool,
-        pub nat_pmp: bool,
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct DiagnosticsReport {
-        pub endpoint_id: iroh::EndpointId,
-        pub net_report: Option<NetReport>,
-        pub direct_addrs: Vec<SocketAddr>,
-        pub relay_latencies: Vec<RelayLatency>,
-        pub portmap_probe: Option<PortMapProbe>,
-    }
-
-    impl fmt::Display for DiagnosticsReport {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            writeln!(f, "=== iroh Network Diagnostics ===")?;
-            writeln!(f, "Endpoint ID: {}", self.endpoint_id)?;
-
-            if let Some(ref nr) = self.net_report {
-                writeln!(
-                    f,
-                    "UDP IPv4: {} | Global: {}",
-                    yn(nr.udp_v4),
-                    nr.global_v4
-                        .map(|a| a.to_string())
-                        .unwrap_or_else(|| "none".into())
-                )?;
-                writeln!(
-                    f,
-                    "UDP IPv6: {} | Global: {}",
-                    yn(nr.udp_v6),
-                    nr.global_v6
-                        .map(|a| a.to_string())
-                        .unwrap_or_else(|| "none".into())
-                )?;
-                writeln!(
-                    f,
-                    "NAT mapping varies by dest (v4): {}  (v6): {}",
-                    opt_bool(nr.mapping_varies_by_dest_ipv4),
-                    opt_bool(nr.mapping_varies_by_dest_ipv6),
-                )?;
-                writeln!(
-                    f,
-                    "Preferred relay: {}",
-                    nr.preferred_relay
-                        .as_ref()
-                        .map(|u| u.to_string())
-                        .unwrap_or_else(|| "none".into())
-                )?;
-                writeln!(f, "Captive portal: {}", opt_bool(nr.captive_portal))?;
-            } else {
-                writeln!(f, "Net report: unavailable")?;
-            }
-
-            if !self.relay_latencies.is_empty() {
-                writeln!(f, "Relay Latency:")?;
-                for rl in &self.relay_latencies {
-                    if let Some(ref err) = rl.error {
-                        writeln!(f, "  {} — error: {}", rl.url, err)?;
-                    } else {
-                        writeln!(
-                            f,
-                            "  {} — connect: {}, ping: {}",
-                            rl.url,
-                            fmt_dur(rl.connect_time),
-                            fmt_dur(rl.ping_latency),
-                        )?;
-                    }
-                }
-            }
-
-            if self.direct_addrs.is_empty() {
-                writeln!(f, "Direct addrs: none")?;
-            } else {
-                let addrs: Vec<_> = self.direct_addrs.iter().map(|a| a.to_string()).collect();
-                writeln!(f, "Direct addrs: {}", addrs.join(", "))?;
-            }
-
-            if let Some(ref probe) = self.portmap_probe {
-                writeln!(
-                    f,
-                    "Port mapping: UPnP: {}, PCP: {}, NAT-PMP: {}",
-                    yn(probe.upnp),
-                    yn(probe.pcp),
-                    yn(probe.nat_pmp),
-                )?;
-            } else {
-                writeln!(f, "Port mapping: probe failed or timed out")?;
-            }
-
-            Ok(())
-        }
-    }
+    use super::*;
 
     /// Run full network diagnostics on an existing endpoint. 10s timeout.
     pub async fn run_diagnostics(endpoint: &Endpoint) -> Result<DiagnosticsReport> {
@@ -296,25 +208,6 @@ mod diagnostics {
             pcp: probe.pcp,
             nat_pmp: probe.nat_pmp,
         })
-    }
-
-    fn yn(b: bool) -> &'static str {
-        if b { "yes" } else { "no" }
-    }
-
-    fn opt_bool(b: Option<bool>) -> &'static str {
-        match b {
-            Some(true) => "yes",
-            Some(false) => "no",
-            None => "unknown",
-        }
-    }
-
-    fn fmt_dur(d: Option<Duration>) -> String {
-        match d {
-            Some(d) => format!("{:.1?}", d),
-            None => "n/a".into(),
-        }
     }
 }
 

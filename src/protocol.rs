@@ -4,7 +4,8 @@ use rcan::Rcan;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{caps::Caps, net_diagnostics::DiagnosticsReport};
+use crate::caps::Caps;
+use crate::net_diagnostics::DiagnosticsReport;
 
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
 
@@ -127,6 +128,18 @@ impl From<PublishTicket> for TicketData {
     }
 }
 
+/// Publishing network diagnostics
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PutNetworkDiagnostics {
+    pub report: crate::net_diagnostics::DiagnosticsReport,
+}
+
+/// ask this node to run diagnostics & return the result.
+/// present even without the net_diagnostics feature flag because the request
+/// struct is empty in both cases
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RunNetworkDiagnostics;
+
 #[cfg(feature = "client_host")]
 pub mod client_host {
     use super::{Caps, N0desMessage, N0desProtocol, Pong, RemoteError};
@@ -242,7 +255,7 @@ pub mod client_host {
                     #[cfg(feature = "net_diagnostics")]
                     {
                         let report =
-                            crate::net_diagnostics::run_diagnostics(&self.endpoint).await?;
+                            crate::net_diagnostics::checks::run_diagnostics(&self.endpoint).await?;
                         tx.send(Ok(report)).await.inspect_err(|e| {
                             warn!("sending network diagnostics response: {:?}", e)
                         })?;
