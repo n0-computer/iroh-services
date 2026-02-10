@@ -34,6 +34,12 @@ pub mod caps;
 pub mod net_diagnostics;
 pub mod protocol;
 
+
+/// Version of this crate.
+pub const IROH_N0DES_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Version of iroh this crate was built against.
+pub const IROH_VERSION: &str = "0.96";
+
 pub use anyhow;
 pub use iroh_metrics::Registry;
 #[cfg(feature = "client_host")]
