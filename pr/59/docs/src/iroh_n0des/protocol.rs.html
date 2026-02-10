@@ -344,7 +344,7 @@
 <a href=#344 id=344 data-nosnippet>344</a>
 <a href=#345 id=345 data-nosnippet>345</a>            <span class="kw">let </span>host = ClientHost::new(<span class="kw-2">&amp;</span>server_ep);
 <a href=#346 id=346 data-nosnippet>346</a>            <span class="kw">let </span>router = Router::builder(server_ep.clone())
-<a href=#347 id=347 data-nosnippet>347</a>                .accept(ALPN.to_vec(), host)
+<a href=#347 id=347 data-nosnippet>347</a>                .accept(ALPN, host)
 <a href=#348 id=348 data-nosnippet>348</a>                .spawn();
 <a href=#349 id=349 data-nosnippet>349</a>
 <a href=#350 id=350 data-nosnippet>350</a>            <span class="comment">// The server grants capabilities to the client. The RCAN is
@@ -391,7 +391,7 @@
 <a href=#391 id=391 data-nosnippet>391</a>
 <a href=#392 id=392 data-nosnippet>392</a>            <span class="kw">let </span>host = ClientHost::new(<span class="kw-2">&amp;</span>server_ep);
 <a href=#393 id=393 data-nosnippet>393</a>            <span class="kw">let </span>router = Router::builder(server_ep.clone())
-<a href=#394 id=394 data-nosnippet>394</a>                .accept(ALPN.to_vec(), host)
+<a href=#394 id=394 data-nosnippet>394</a>                .accept(ALPN, host)
 <a href=#395 id=395 data-nosnippet>395</a>                .spawn();
 <a href=#396 id=396 data-nosnippet>396</a>
 <a href=#397 id=397 data-nosnippet>397</a>            <span class="comment">// Client creates its own RCAN (self-signed, not issued by server).
