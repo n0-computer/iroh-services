@@ -38,7 +38,6 @@ pub use iroh_metrics::Registry;
 
 #[cfg(feature = "tickets")]
 pub use self::client::PublishedTicket;
-
 pub use self::{
     api_secret::ApiSecret,
     client::{Client, ClientBuilder},

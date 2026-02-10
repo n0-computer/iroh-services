@@ -731,15 +731,12 @@ mod tests {
         let fake_endpoint_addr: EndpointAddr = fake_endpoint_id.into();
         assert_eq!(builder.remote, Some(fake_endpoint_addr));
 
-        let rcan = crate::caps::create_api_token_from_secret_key(
-            shared_secret,
-            endpoint.id(),
-            builder.cap_expiry,
-            Caps::for_shared_secret(),
-        )
-        .unwrap();
-        assert_eq!(builder.cap, Some(rcan.clone()));
-        assert_eq!(rcan.capability(), &Caps::new([Cap::Client]));
+        // Compare capability fields individually to avoid flaky timestamp
+        // mismatches between the builder's rcan and a freshly-created one.
+        let cap = builder.cap.as_ref().expect("expected capability to be set");
+        assert_eq!(cap.capability(), &Caps::new([Cap::Client]));
+        assert_eq!(cap.audience(), &endpoint.id().as_verifying_key());
+        assert_eq!(cap.issuer(), &shared_secret.public().as_verifying_key());
     }
 
     /// Assert that disabling metrics interval can manually send metrics without
