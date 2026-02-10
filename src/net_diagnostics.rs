@@ -224,7 +224,7 @@ mod tests {
             .bind()
             .await
             .unwrap();
-        let report = run_diagnostics(&endpoint).await.unwrap();
+        run_diagnostics(&endpoint).await.unwrap();
         endpoint.close().await;
     }
 }

@@ -4,8 +4,7 @@ use rcan::Rcan;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::caps::Caps;
-use crate::net_diagnostics::DiagnosticsReport;
+use crate::{caps::Caps, net_diagnostics::DiagnosticsReport};
 
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
 
@@ -152,17 +151,20 @@ pub struct GrantCap {
 
 #[cfg(feature = "client_host")]
 pub mod client_host {
-    use super::{Caps, N0desMessage, N0desProtocol, Pong, RemoteError};
-    use crate::caps::NetDiagnosticsCap;
-
     use anyhow::{Result, bail, ensure};
-    use iroh::protocol::{AcceptError, ProtocolHandler};
-    use iroh::{Endpoint, EndpointId, endpoint::Connection};
+    use iroh::{
+        Endpoint, EndpointId,
+        endpoint::Connection,
+        protocol::{AcceptError, ProtocolHandler},
+    };
     use irpc::WithChannels;
     use irpc_iroh::read_request;
     use n0_error::AnyError;
     use rcan::{Capability, CapabilityOrigin, Rcan};
     use tracing::{debug, warn};
+
+    use super::{Caps, N0desMessage, N0desProtocol, Pong, RemoteError};
+    use crate::caps::NetDiagnosticsCap;
 
     #[derive(Debug)]
     pub struct ClientHost {
@@ -315,14 +317,15 @@ pub mod client_host {
     #[cfg(test)]
     #[cfg(feature = "net_diagnostics")]
     mod tests {
-        use super::*;
-        use crate::caps::{Caps, create_grant_token};
-        use crate::protocol::{ALPN, Auth, N0desClient, RunNetworkDiagnostics};
-        use iroh::RelayMode;
-        use iroh::address_lookup::MemoryLookup;
-        use iroh::protocol::Router;
+        use iroh::{RelayMode, address_lookup::MemoryLookup, protocol::Router};
         use irpc_iroh::IrohLazyRemoteConnection;
         use n0_future::time::Duration;
+
+        use super::*;
+        use crate::{
+            caps::{Caps, create_grant_token},
+            protocol::{ALPN, Auth, N0desClient, RunNetworkDiagnostics},
+        };
 
         #[tokio::test]
         async fn test_client_host_run_diagnostics() {

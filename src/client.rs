@@ -479,6 +479,8 @@ enum ClientActorMessage {
     Ping {
         done: oneshot::Sender<Result<Pong, RemoteError>>,
     },
+    // GrantCap is used by the `client_host` feature flag
+    #[allow(dead_code)]
     GrantCap {
         // boxed to avoid large enum variants
         cap: Box<Rcan<Caps>>,
