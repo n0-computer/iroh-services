@@ -49,6 +49,9 @@ portmapper = { version = "0.13", optional = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3.2", features = ["wasm_js"] }
 
+[build-dependencies]
+built = { version = "0.7", features = ["cargo-lock"] }
+
 [dev-dependencies]
 temp_env_vars = "0.2.1"
 tokio = { version = "1.45", features = ["macros", "rt", "rt-multi-thread"] }

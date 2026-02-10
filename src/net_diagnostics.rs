@@ -18,10 +18,8 @@ pub struct DiagnosticsReport {
     pub net_report: Option<NetReport>,
     pub direct_addrs: Vec<SocketAddr>,
     pub portmap_probe: Option<PortMapProbe>,
-    #[serde(default)]
-    pub iroh_version: Option<String>,
-    #[serde(default)]
-    pub iroh_n0des_version: Option<String>,
+    pub iroh_version: String,
+    pub iroh_n0des_version: String,
 }
 
 /// Port mapping protocol availability on the LAN.
@@ -94,8 +92,8 @@ pub mod checks {
             net_report,
             direct_addrs,
             portmap_probe,
-            iroh_version: Some(crate::IROH_VERSION.to_string()),
-            iroh_n0des_version: Some(crate::IROH_N0DES_VERSION.to_string()),
+            iroh_version: crate::IROH_VERSION.to_string(),
+            iroh_n0des_version: crate::IROH_N0DES_VERSION.to_string(),
         })
     }
 

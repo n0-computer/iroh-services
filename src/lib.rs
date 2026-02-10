@@ -34,11 +34,21 @@ pub mod caps;
 pub mod net_diagnostics;
 pub mod protocol;
 
+mod built_info {
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
 
 /// Version of this crate.
-pub const IROH_N0DES_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const IROH_N0DES_VERSION: &str = built_info::PKG_VERSION;
+
 /// Version of iroh this crate was built against.
-pub const IROH_VERSION: &str = "0.96";
+pub static IROH_VERSION: std::sync::LazyLock<&str> = std::sync::LazyLock::new(|| {
+    built_info::DEPENDENCIES
+        .iter()
+        .find(|(name, _)| *name == "iroh")
+        .expect("iroh dependency not found")
+        .1
+});
 
 pub use anyhow;
 pub use iroh_metrics::Registry;
