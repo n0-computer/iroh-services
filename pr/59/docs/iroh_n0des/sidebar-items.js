@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["API_SECRET_ENV_VAR_NAME"],"mod":["api_secret","caps","net_diagnostics","protocol"],"struct":["Client","ClientBuilder","PublishedTicket","Registry"]};
+window.SIDEBAR_ITEMS = {"constant":["API_SECRET_ENV_VAR_NAME","IROH_N0DES_VERSION"],"mod":["api_secret","caps","net_diagnostics","protocol"],"static":["IROH_VERSION"],"struct":["Client","ClientBuilder","PublishedTicket","Registry"]};
