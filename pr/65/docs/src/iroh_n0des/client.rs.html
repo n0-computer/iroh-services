@@ -731,41 +731,38 @@
 <a href=#731 id=731 data-nosnippet>731</a>        <span class="kw">let </span>fake_endpoint_addr: EndpointAddr = fake_endpoint_id.into();
 <a href=#732 id=732 data-nosnippet>732</a>        <span class="macro">assert_eq!</span>(builder.remote, <span class="prelude-val">Some</span>(fake_endpoint_addr));
 <a href=#733 id=733 data-nosnippet>733</a>
-<a href=#734 id=734 data-nosnippet>734</a>        <span class="kw">let </span>rcan = <span class="kw">crate</span>::caps::create_api_token_from_secret_key(
-<a href=#735 id=735 data-nosnippet>735</a>            shared_secret,
-<a href=#736 id=736 data-nosnippet>736</a>            endpoint.id(),
-<a href=#737 id=737 data-nosnippet>737</a>            builder.cap_expiry,
-<a href=#738 id=738 data-nosnippet>738</a>            Caps::for_shared_secret(),
-<a href=#739 id=739 data-nosnippet>739</a>        )
-<a href=#740 id=740 data-nosnippet>740</a>        .unwrap();
-<a href=#741 id=741 data-nosnippet>741</a>        <span class="macro">assert_eq!</span>(builder.cap, <span class="prelude-val">Some</span>(rcan.clone()));
-<a href=#742 id=742 data-nosnippet>742</a>        <span class="macro">assert_eq!</span>(rcan.capability(), <span class="kw-2">&amp;</span>Caps::new([Cap::Client]));
-<a href=#743 id=743 data-nosnippet>743</a>    }
-<a href=#744 id=744 data-nosnippet>744</a>
-<a href=#745 id=745 data-nosnippet>745</a>    <span class="doccomment">/// Assert that disabling metrics interval can manually send metrics without
-<a href=#746 id=746 data-nosnippet>746</a>    /// panicking. Metrics sending itself is expected to fail.
-<a href=#747 id=747 data-nosnippet>747</a>    </span><span class="attr">#[tokio::test]
-<a href=#748 id=748 data-nosnippet>748</a>    </span><span class="kw">async fn </span>test_no_metrics_interval() {
-<a href=#749 id=749 data-nosnippet>749</a>        <span class="kw">let </span><span class="kw-2">mut </span>rng = rand::rng();
-<a href=#750 id=750 data-nosnippet>750</a>        <span class="kw">let </span>shared_secret = SecretKey::generate(<span class="kw-2">&amp;mut </span>rng);
-<a href=#751 id=751 data-nosnippet>751</a>        <span class="kw">let </span>fake_endpoint_id = SecretKey::generate(<span class="kw-2">&amp;mut </span>rng).public();
-<a href=#752 id=752 data-nosnippet>752</a>        <span class="kw">let </span>api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
-<a href=#753 id=753 data-nosnippet>753</a>
-<a href=#754 id=754 data-nosnippet>754</a>        <span class="kw">let </span>endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
-<a href=#755 id=755 data-nosnippet>755</a>            .bind()
-<a href=#756 id=756 data-nosnippet>756</a>            .<span class="kw">await
-<a href=#757 id=757 data-nosnippet>757</a>            </span>.unwrap();
-<a href=#758 id=758 data-nosnippet>758</a>
-<a href=#759 id=759 data-nosnippet>759</a>        <span class="kw">let </span>client = Client::builder(<span class="kw-2">&amp;</span>endpoint)
-<a href=#760 id=760 data-nosnippet>760</a>            .disable_metrics_interval()
-<a href=#761 id=761 data-nosnippet>761</a>            .api_secret(api_secret)
-<a href=#762 id=762 data-nosnippet>762</a>            .unwrap()
-<a href=#763 id=763 data-nosnippet>763</a>            .build()
-<a href=#764 id=764 data-nosnippet>764</a>            .<span class="kw">await
-<a href=#765 id=765 data-nosnippet>765</a>            </span>.unwrap();
-<a href=#766 id=766 data-nosnippet>766</a>
-<a href=#767 id=767 data-nosnippet>767</a>        <span class="kw">let </span>err = client.push_metrics().<span class="kw">await</span>;
-<a href=#768 id=768 data-nosnippet>768</a>        <span class="macro">assert!</span>(err.is_err());
-<a href=#769 id=769 data-nosnippet>769</a>    }
-<a href=#770 id=770 data-nosnippet>770</a>}
+<a href=#734 id=734 data-nosnippet>734</a>        <span class="comment">// Compare capability fields individually to avoid flaky timestamp
+<a href=#735 id=735 data-nosnippet>735</a>        // mismatches between the builder's rcan and a freshly-created one.
+<a href=#736 id=736 data-nosnippet>736</a>        </span><span class="kw">let </span>cap = builder.cap.as_ref().expect(<span class="string">"expected capability to be set"</span>);
+<a href=#737 id=737 data-nosnippet>737</a>        <span class="macro">assert_eq!</span>(cap.capability(), <span class="kw-2">&amp;</span>Caps::new([Cap::Client]));
+<a href=#738 id=738 data-nosnippet>738</a>        <span class="macro">assert_eq!</span>(cap.audience(), <span class="kw-2">&amp;</span>endpoint.id().as_verifying_key());
+<a href=#739 id=739 data-nosnippet>739</a>        <span class="macro">assert_eq!</span>(cap.issuer(), <span class="kw-2">&amp;</span>shared_secret.public().as_verifying_key());
+<a href=#740 id=740 data-nosnippet>740</a>    }
+<a href=#741 id=741 data-nosnippet>741</a>
+<a href=#742 id=742 data-nosnippet>742</a>    <span class="doccomment">/// Assert that disabling metrics interval can manually send metrics without
+<a href=#743 id=743 data-nosnippet>743</a>    /// panicking. Metrics sending itself is expected to fail.
+<a href=#744 id=744 data-nosnippet>744</a>    </span><span class="attr">#[tokio::test]
+<a href=#745 id=745 data-nosnippet>745</a>    </span><span class="kw">async fn </span>test_no_metrics_interval() {
+<a href=#746 id=746 data-nosnippet>746</a>        <span class="kw">let </span><span class="kw-2">mut </span>rng = rand::rng();
+<a href=#747 id=747 data-nosnippet>747</a>        <span class="kw">let </span>shared_secret = SecretKey::generate(<span class="kw-2">&amp;mut </span>rng);
+<a href=#748 id=748 data-nosnippet>748</a>        <span class="kw">let </span>fake_endpoint_id = SecretKey::generate(<span class="kw-2">&amp;mut </span>rng).public();
+<a href=#749 id=749 data-nosnippet>749</a>        <span class="kw">let </span>api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+<a href=#750 id=750 data-nosnippet>750</a>
+<a href=#751 id=751 data-nosnippet>751</a>        <span class="kw">let </span>endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
+<a href=#752 id=752 data-nosnippet>752</a>            .bind()
+<a href=#753 id=753 data-nosnippet>753</a>            .<span class="kw">await
+<a href=#754 id=754 data-nosnippet>754</a>            </span>.unwrap();
+<a href=#755 id=755 data-nosnippet>755</a>
+<a href=#756 id=756 data-nosnippet>756</a>        <span class="kw">let </span>client = Client::builder(<span class="kw-2">&amp;</span>endpoint)
+<a href=#757 id=757 data-nosnippet>757</a>            .disable_metrics_interval()
+<a href=#758 id=758 data-nosnippet>758</a>            .api_secret(api_secret)
+<a href=#759 id=759 data-nosnippet>759</a>            .unwrap()
+<a href=#760 id=760 data-nosnippet>760</a>            .build()
+<a href=#761 id=761 data-nosnippet>761</a>            .<span class="kw">await
+<a href=#762 id=762 data-nosnippet>762</a>            </span>.unwrap();
+<a href=#763 id=763 data-nosnippet>763</a>
+<a href=#764 id=764 data-nosnippet>764</a>        <span class="kw">let </span>err = client.push_metrics().<span class="kw">await</span>;
+<a href=#765 id=765 data-nosnippet>765</a>        <span class="macro">assert!</span>(err.is_err());
+<a href=#766 id=766 data-nosnippet>766</a>    }
+<a href=#767 id=767 data-nosnippet>767</a>}
 </code></pre></div></section></main></body></html>
