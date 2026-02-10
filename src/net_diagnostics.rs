@@ -3,9 +3,13 @@
 //! Collects a full network diagnostics report from an existing iroh Endpoint
 //! covering UDP connectivity, relay latency, and port mapping protocol
 //! availability.
-use std::{net::SocketAddr, time::Duration};
+//!
+//! Relay latencies and UDP connectivity are read from iroh's [`NetReport`]
+//! which the endpoint already produces continuously. The only additional probe
+//! performed here is the port-mapping protocol availability check.
+use std::net::SocketAddr;
 
-use iroh::{NetReport, RelayUrl};
+use iroh::NetReport;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,20 +17,10 @@ pub struct DiagnosticsReport {
     pub endpoint_id: iroh::EndpointId,
     pub net_report: Option<NetReport>,
     pub direct_addrs: Vec<SocketAddr>,
-    pub relay_latencies: Vec<RelayLatency>,
     pub portmap_probe: Option<PortMapProbe>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RelayLatency {
-    pub url: RelayUrl,
-    pub connect_time: Option<Duration>,
-    pub ping_latency: Option<Duration>,
-    pub error: Option<String>,
-}
-
 /// Port mapping protocol availability on the LAN.
-/// This can be avoided if we make the original port mapping probe return a serde-able struct.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortMapProbe {
     pub upnp: bool,
@@ -36,15 +30,10 @@ pub struct PortMapProbe {
 
 #[cfg(feature = "net_diagnostics")]
 pub mod checks {
-    use std::{
-        net::SocketAddr,
-        time::{Duration, Instant},
-    };
+    use std::{net::SocketAddr, time::Duration};
 
     use anyhow::Result;
-    use iroh::{Endpoint, RelayUrl, Watcher};
-    use iroh_relay::protos::relay::{ClientToRelayMsg, RelayToClientMsg};
-    use n0_future::{SinkExt, StreamExt};
+    use iroh::{Endpoint, Watcher};
 
     use super::*;
 
@@ -65,134 +54,43 @@ pub mod checks {
             .await
             .is_err()
         {
-            eprintln!("waiting for relay connection timed out after {timeout:?}");
+            tracing::warn!("waiting for relay connection timed out after {timeout:?}");
         }
 
-        // 2. Net report
+        // 2. Net report (includes relay latencies and UDP connectivity)
         let mut watcher = endpoint.net_report();
         let net_report = match tokio::time::timeout(timeout, watcher.initialized()).await {
             Ok(report) => Some(report),
             Err(_) => {
-                eprintln!("net report timed out after {timeout:?}, using partial data");
+                tracing::warn!("net report timed out after {timeout:?}, using partial data");
                 watcher.get()
             }
         };
 
         // 3. Endpoint address info
         let addr = endpoint.addr();
-        let relay_urls: Vec<RelayUrl> = addr.relay_urls().cloned().collect();
         let direct_addrs: Vec<SocketAddr> = addr.ip_addrs().copied().collect();
 
-        // 4. Relay latency + port mapping probe in parallel
-        let relay_fut = async {
-            let mut results = Vec::new();
-            for url in &relay_urls {
-                results.push(probe_relay_latency(endpoint, url).await);
-            }
-            results
-        };
-
-        let portmap_fut = async {
+        // 4. Port mapping probe (the one thing NetReport doesn't include)
+        let portmap_probe =
             match tokio::time::timeout(Duration::from_secs(5), probe_port_mapping()).await {
                 Ok(Ok(p)) => Some(p),
                 Ok(Err(e)) => {
-                    eprintln!("portmap probe failed: {e}");
+                    tracing::warn!("portmap probe failed: {e}");
                     None
                 }
                 Err(_) => {
-                    eprintln!("portmap probe timed out");
+                    tracing::warn!("portmap probe timed out");
                     None
                 }
-            }
-        };
-
-        let (relay_latencies, portmap_probe) = tokio::join!(relay_fut, portmap_fut);
+            };
 
         Ok(DiagnosticsReport {
             endpoint_id,
             net_report,
             direct_addrs,
-            relay_latencies,
             portmap_probe,
         })
-    }
-
-    async fn probe_relay_latency(endpoint: &Endpoint, url: &RelayUrl) -> RelayLatency {
-        let builder = iroh_relay::client::ClientBuilder::new(
-            url.clone(),
-            endpoint.secret_key().clone(),
-            endpoint.dns_resolver().clone(),
-        );
-
-        let start = Instant::now();
-        let client = match tokio::time::timeout(Duration::from_secs(3), builder.connect()).await {
-            Ok(Ok(c)) => c,
-            Ok(Err(e)) => {
-                return RelayLatency {
-                    url: url.clone(),
-                    connect_time: None,
-                    ping_latency: None,
-                    error: Some(format!("connect error: {e}")),
-                };
-            }
-            Err(_) => {
-                return RelayLatency {
-                    url: url.clone(),
-                    connect_time: None,
-                    ping_latency: None,
-                    error: Some("connect timeout".into()),
-                };
-            }
-        };
-        let connect_time = start.elapsed();
-
-        let (mut stream, mut sink) = client.split();
-        let data: [u8; 8] = rand::random();
-        let ping_start = Instant::now();
-
-        if let Err(e) = sink.send(ClientToRelayMsg::Ping(data)).await {
-            return RelayLatency {
-                url: url.clone(),
-                connect_time: Some(connect_time),
-                ping_latency: None,
-                error: Some(format!("ping send error: {e}")),
-            };
-        }
-
-        let ping_result = tokio::time::timeout(Duration::from_secs(3), async {
-            while let Some(res) = stream.next().await {
-                match res {
-                    Ok(RelayToClientMsg::Pong(d)) if d == data => {
-                        return Ok(ping_start.elapsed());
-                    }
-                    Ok(_) => continue,
-                    Err(e) => return Err(anyhow::anyhow!("stream error: {e}")),
-                }
-            }
-            Err(anyhow::anyhow!("stream ended without pong"))
-        })
-        .await;
-
-        match ping_result {
-            Ok(Ok(latency)) => RelayLatency {
-                url: url.clone(),
-                connect_time: Some(connect_time),
-                ping_latency: Some(latency),
-                error: None,
-            },
-            Ok(Err(e)) => RelayLatency {
-                url: url.clone(),
-                connect_time: Some(connect_time),
-                ping_latency: None,
-                error: Some(e.to_string()),
-            },
-            Err(_) => RelayLatency {
-                url: url.clone(),
-                connect_time: Some(connect_time),
-                ping_latency: None,
-                error: Some("ping timeout".into()),
-            },
-        }
     }
 
     async fn probe_port_mapping() -> Result<PortMapProbe> {

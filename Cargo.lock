@@ -1553,7 +1553,6 @@ dependencies = [
  "iroh",
  "iroh-metrics",
  "iroh-quinn",
- "iroh-relay",
  "iroh-tickets",
  "irpc",
  "irpc-iroh",
