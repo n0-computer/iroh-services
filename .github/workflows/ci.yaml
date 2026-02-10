@@ -193,23 +193,23 @@ jobs:
       - uses: taiki-e/install-action@cargo-make
       - run: cargo make format-check
 
-check_docs:
-  timeout-minutes: 30
-  name: Checking docs
-  runs-on: ubuntu-latest
-  env:
-    RUSTC_WRAPPER: "sccache"
-    SCCACHE_GHA_ENABLED: "on"
-    RUSTDOCFLAGS: -Dwarnings
-  steps:
-    - uses: actions/checkout@v6
-    - uses: dtolnay/rust-toolchain@nightly
-    - uses: dtolnay/install@cargo-docs-rs
-    - name: Install sccache
-      uses: mozilla-actions/sccache-action@v0.0.9
+  check_docs:
+    timeout-minutes: 30
+    name: Checking docs
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: "sccache"
+      SCCACHE_GHA_ENABLED: "on"
+      RUSTDOCFLAGS: -Dwarnings
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/install@cargo-docs-rs
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
-    - name: iroh-n0des docs
-      run: cargo docs-rs
+      - name: iroh-n0des docs
+        run: cargo docs-rs
 
   clippy_check:
     timeout-minutes: 30
