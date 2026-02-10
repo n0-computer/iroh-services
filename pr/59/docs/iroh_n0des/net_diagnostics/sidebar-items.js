@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["checks"],"struct":["DiagnosticsReport","PortMapProbe","RelayLatency"]};
+window.SIDEBAR_ITEMS = {"mod":["checks"],"struct":["DiagnosticsReport","PortMapProbe"]};
