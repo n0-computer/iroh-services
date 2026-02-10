@@ -344,7 +344,7 @@ pub mod client_host {
 
             let host = ClientHost::new(&server_ep);
             let router = Router::builder(server_ep.clone())
-                .accept(ALPN.to_vec(), host)
+                .accept(ALPN, host)
                 .spawn();
 
             // The server grants capabilities to the client. The RCAN is
@@ -391,7 +391,7 @@ pub mod client_host {
 
             let host = ClientHost::new(&server_ep);
             let router = Router::builder(server_ep.clone())
-                .accept(ALPN.to_vec(), host)
+                .accept(ALPN, host)
                 .spawn();
 
             // Client creates its own RCAN (self-signed, not issued by server).

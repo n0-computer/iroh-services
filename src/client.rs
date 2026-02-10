@@ -52,7 +52,7 @@ use crate::{
 /// [`ApiSecret`]: crate::api_secret::ApiSecret
 #[derive(Debug, Clone)]
 pub struct Client {
-    // owned clone of the endpoint for diagnostics, and for conection restarts on actor close
+    // owned clone of the endpoint for diagnostics, and for connection restarts on actor close
     #[allow(dead_code)]
     endpoint: Endpoint,
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,

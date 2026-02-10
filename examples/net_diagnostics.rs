@@ -31,13 +31,13 @@ async fn main() -> Result<()> {
         .build()
         .await?;
 
-    // 4. grant the abillity to get diagnostics to the remote EndpointID associated
+    // 4. grant the ability to get diagnostics to the remote EndpointID associated
     //    with our project on n0des. This will create a capability token, send it to
     //    the remote for storage & confirm receipt. We do this in a task to avoid
     //    blocking the local node startup in the rare case that remote endpoint is
     //    down when this process starts.
     let client2 = client.clone();
-    let remote_id = secret.addr().id.clone();
+    let remote_id = secret.addr().id;
     tokio::spawn(async move {
         client2
             .grant_capability(remote_id, vec![NetDiagnosticsCap::GetAny])
@@ -52,9 +52,7 @@ async fn main() -> Result<()> {
     // 6. Register the ClientHost on the n0des ALPN and spawn the router.
     //    Once running, n0des can open connections to this endpoint and send
     //    RPC requests such as RunNetworkDiagnostics.
-    let router = Router::builder(endpoint)
-        .accept(ALPN.to_vec(), host)
-        .spawn();
+    let router = Router::builder(endpoint).accept(ALPN, host).spawn();
 
     // 6. Run diagnostics locally (pass true to also upload results to n0des).
     println!("Running network diagnostics...\n");
