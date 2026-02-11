@@ -53,7 +53,7 @@ pub static IROH_VERSION: std::sync::LazyLock<&str> = std::sync::LazyLock::new(||
 pub use anyhow;
 pub use iroh_metrics::Registry;
 #[cfg(feature = "client_host")]
-pub use protocol::client_host::ClientHost;
+pub use protocol::client_host::{ClientHost, DiagnosticsHost};
 
 #[cfg(feature = "tickets")]
 pub use self::client::PublishedTicket;
@@ -62,5 +62,5 @@ pub use self::net_diagnostics::{DiagnosticsReport, checks::run_diagnostics};
 pub use self::{
     api_secret::ApiSecret,
     client::{API_SECRET_ENV_VAR_NAME, Client, ClientBuilder},
-    protocol::ALPN,
+    protocol::{ALPN, NET_DIAGNOSTICS_ALPN, NetDiagnosticsClient},
 };

@@ -7,8 +7,10 @@ use uuid::Uuid;
 use crate::{caps::Caps, net_diagnostics::DiagnosticsReport};
 
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
+pub const NET_DIAGNOSTICS_ALPN: &[u8] = b"n0/n0des-net-diagnostics/1";
 
 pub type N0desClient = irpc::Client<N0desProtocol>;
+pub type NetDiagnosticsClient = irpc::Client<NetDiagnosticsProtocol>;
 
 #[rpc_requests(message = N0desMessage)]
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,13 +32,22 @@ pub enum N0desProtocol {
     #[rpc(tx=oneshot::Sender<RemoteResult<Vec<TicketData>>>)]
     TicketList(ListTickets),
 
-    #[rpc(tx=oneshot::Sender<RemoteResult<DiagnosticsReport>>)]
-    RunNetworkDiagnostics(RunNetworkDiagnostics),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     PutNetworkDiagnostics(PutNetworkDiagnostics),
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     GrantCap(GrantCap),
+}
+
+/// Dedicated protocol for cloud-to-endpoint net diagnostics connections.
+#[rpc_requests(message = NetDiagnosticsMessage)]
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
+pub enum NetDiagnosticsProtocol {
+    #[rpc(tx=oneshot::Sender<()>)]
+    Auth(Auth),
+    #[rpc(tx=oneshot::Sender<RemoteResult<DiagnosticsReport>>)]
+    RunNetworkDiagnostics(RunNetworkDiagnostics),
 }
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
@@ -204,7 +215,7 @@ pub mod client_host {
             let rcan = inner.caps;
             let capability = rcan.capability();
 
-            let res = self.verify_rcan(remote_node_id, &rcan).await;
+            let res = verify_rcan(&self.endpoint, remote_node_id, &rcan);
             match res {
                 Ok(()) => tx.send(()).await?,
                 Err(err) => {
@@ -227,7 +238,7 @@ pub mod client_host {
             &self,
             connection: &Connection,
             remote_node_id: EndpointId,
-            capability: &Caps,
+            _capability: &Caps,
             request: N0desMessage,
         ) -> Result<(), anyhow::Error> {
             debug!(remote_node_id = %remote_node_id.fmt_short(), "handle RPC request");
@@ -241,7 +252,80 @@ pub mod client_host {
                     let req_id = inner.req_id;
                     tx.send(Pong { req_id }).await?;
                 }
-                N0desMessage::RunNetworkDiagnostics(msg) => {
+                N0desMessage::GrantCap(msg) => {
+                    let WithChannels { tx, .. } = msg;
+                    // ACK receipt. Server-side storage of granted caps is
+                    // handled by the n0des service, not the client host.
+                    tx.send(Ok(())).await?;
+                }
+                _ => {
+                    bail!("unsupported message type");
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// Protocol handler for cloud-to-endpoint net diagnostics connections.
+    #[derive(Debug)]
+    pub struct DiagnosticsHost {
+        endpoint: Endpoint,
+    }
+
+    impl ProtocolHandler for DiagnosticsHost {
+        async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+            self.handle_connection(connection).await.map_err(|e| {
+                let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
+                AcceptError::from(AnyError::from(boxed))
+            })
+        }
+    }
+
+    impl DiagnosticsHost {
+        pub fn new(endpoint: &Endpoint) -> Self {
+            Self {
+                endpoint: endpoint.clone(),
+            }
+        }
+
+        async fn handle_connection(&self, connection: Connection) -> Result<()> {
+            use super::{NetDiagnosticsMessage, NetDiagnosticsProtocol};
+
+            let remote_node_id = connection.remote_id();
+            let Some(first_request) = read_request::<NetDiagnosticsProtocol>(&connection).await?
+            else {
+                return Ok(());
+            };
+
+            let NetDiagnosticsMessage::Auth(WithChannels { inner, tx, .. }) = first_request else {
+                debug!(remote_node_id = %remote_node_id.fmt_short(), "Expected initial auth message");
+                connection.close(400u32.into(), b"Expected initial auth message");
+                return Ok(());
+            };
+            let rcan = inner.caps;
+            let capability = rcan.capability();
+
+            let res = verify_rcan(&self.endpoint, remote_node_id, &rcan);
+            match res {
+                Ok(()) => tx.send(()).await?,
+                Err(err) => {
+                    warn!("authentication failed: {err:?}");
+                    connection.close(401u32.into(), b"Unauthorized");
+                    return Ok(());
+                }
+            }
+
+            // Read exactly one RunNetworkDiagnostics request
+            let Some(request) = read_request::<NetDiagnosticsProtocol>(&connection).await? else {
+                return Ok(());
+            };
+
+            match request {
+                NetDiagnosticsMessage::Auth(_) => {
+                    connection.close(400u32.into(), b"Unexpected auth message");
+                    anyhow::bail!("unexpected auth message");
+                }
+                NetDiagnosticsMessage::RunNetworkDiagnostics(msg) => {
                     let WithChannels { tx, .. } = msg;
                     let needed_caps = Caps::new([NetDiagnosticsCap::GetAny]);
                     if !capability.permits(&needed_caps) {
@@ -265,44 +349,37 @@ pub mod client_host {
                         })?;
                     }
                 }
-                N0desMessage::GrantCap(msg) => {
-                    let WithChannels { tx, .. } = msg;
-                    // ACK receipt. Server-side storage of granted caps is
-                    // handled by the n0des service, not the client host.
-                    tx.send(Ok(())).await?;
-                }
-                _ => {
-                    bail!("unsupported message type");
-                }
             }
+
+            connection.closed().await;
             Ok(())
         }
+    }
 
-        async fn verify_rcan(&self, remote_node: EndpointId, rcan: &Rcan<Caps>) -> Result<()> {
-            // Must be a first-party token (not delegated)
-            ensure!(
-                matches!(rcan.capability_origin(), CapabilityOrigin::Issuer),
-                "invalid capability origin: expected first-party token"
-            );
+    fn verify_rcan(endpoint: &Endpoint, remote_node: EndpointId, rcan: &Rcan<Caps>) -> Result<()> {
+        // Must be a first-party token (not delegated)
+        ensure!(
+            matches!(rcan.capability_origin(), CapabilityOrigin::Issuer),
+            "invalid capability origin: expected first-party token"
+        );
 
-            // Issuer must be this endpoint (we issued this grant)
-            ensure!(
-                EndpointId::try_from(rcan.issuer().as_bytes())
-                    .map(|id| id == self.endpoint.id())
-                    .unwrap_or(false),
-                "invalid issuer: RCAN was not issued by this endpoint"
-            );
+        // Issuer must be this endpoint (we issued this grant)
+        ensure!(
+            EndpointId::try_from(rcan.issuer().as_bytes())
+                .map(|id| id == endpoint.id())
+                .unwrap_or(false),
+            "invalid issuer: RCAN was not issued by this endpoint"
+        );
 
-            // Audience must be the remote node (the token is for them)
-            ensure!(
-                EndpointId::try_from(rcan.audience().as_bytes())
-                    .map(|id| id == remote_node)
-                    .unwrap_or(false),
-                "invalid audience: RCAN audience does not match remote node"
-            );
+        // Audience must be the remote node (the token is for them)
+        ensure!(
+            EndpointId::try_from(rcan.audience().as_bytes())
+                .map(|id| id == remote_node)
+                .unwrap_or(false),
+            "invalid audience: RCAN audience does not match remote node"
+        );
 
-            Ok(())
-        }
+        Ok(())
     }
 
     async fn send_missing_caps<T>(
@@ -324,11 +401,13 @@ pub mod client_host {
         use super::*;
         use crate::{
             caps::{Caps, create_grant_token},
-            protocol::{ALPN, Auth, N0desClient, RunNetworkDiagnostics},
+            protocol::{
+                ALPN, Auth, NET_DIAGNOSTICS_ALPN, NetDiagnosticsClient, RunNetworkDiagnostics,
+            },
         };
 
         #[tokio::test]
-        async fn test_client_host_run_diagnostics() {
+        async fn test_diagnostics_host_run_diagnostics() {
             let lookup = MemoryLookup::new();
             let server_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
                 .address_lookup(lookup.clone())
@@ -343,13 +422,13 @@ pub mod client_host {
                 .unwrap();
 
             let host = ClientHost::new(&server_ep);
+            let diag_host = DiagnosticsHost::new(&server_ep);
             let router = Router::builder(server_ep.clone())
                 .accept(ALPN, host)
+                .accept(NET_DIAGNOSTICS_ALPN, diag_host)
                 .spawn();
 
-            // The server grants capabilities to the client. The RCAN is
-            // issued by the server (issuer = server secret key) with the
-            // client as the audience.
+            // The server grants capabilities to the client.
             let rcan = create_grant_token(
                 server_ep.secret_key().clone(),
                 client_ep.id(),
@@ -358,9 +437,13 @@ pub mod client_host {
             )
             .unwrap();
 
-            let conn =
-                IrohLazyRemoteConnection::new(client_ep.clone(), server_ep.addr(), ALPN.to_vec());
-            let client = N0desClient::boxed(conn);
+            // Connect on the net diagnostics ALPN
+            let conn = IrohLazyRemoteConnection::new(
+                client_ep.clone(),
+                server_ep.addr(),
+                NET_DIAGNOSTICS_ALPN.to_vec(),
+            );
+            let client = NetDiagnosticsClient::boxed(conn);
 
             // authenticate with the server-issued grant
             client.rpc(Auth { caps: rcan }).await.unwrap();
@@ -395,8 +478,6 @@ pub mod client_host {
                 .spawn();
 
             // Client creates its own RCAN (self-signed, not issued by server).
-            // This should be rejected because the issuer doesn't match the
-            // server endpoint.
             let rcan = create_grant_token(
                 client_ep.secret_key().clone(),
                 client_ep.id(),
@@ -407,7 +488,7 @@ pub mod client_host {
 
             let conn =
                 IrohLazyRemoteConnection::new(client_ep.clone(), server_ep.addr(), ALPN.to_vec());
-            let client = N0desClient::boxed(conn);
+            let client = super::super::N0desClient::boxed(conn);
 
             // auth should fail because the RCAN issuer is the client, not the server
             let result = client.rpc(Auth { caps: rcan }).await;
