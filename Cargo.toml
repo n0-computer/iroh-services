@@ -78,4 +78,4 @@ required-features = ["tickets"]
 
 [[example]]
 name = "net_diagnostics"
-required-features = ["net_diagnostics"]
+required-features = ["net_diagnostics", "client_host"]
