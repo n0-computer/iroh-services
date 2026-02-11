@@ -44,9 +44,13 @@ ssh-key = { version = "0.7.0-rc.3", features = ["ed25519"], optional = true }
 quinn = { package = "iroh-quinn", version = "0.16.0", default-features = false, optional = true }
 time = { version = "0.3.41", features = ["serde", "serde-well-known"], optional = true }
 tokio-util = { version = "0.7.16", optional = true }
+portmapper = { version = "0.14", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3.2", features = ["wasm_js"] }
+
+[build-dependencies]
+built = { version = "0.7", features = ["cargo-lock"] }
 
 [dev-dependencies]
 temp_env_vars = "0.2.1"
@@ -56,7 +60,9 @@ tokio = { version = "1.45", features = ["macros", "rt", "rt-multi-thread"] }
 [features]
 default = ["client"]
 client = []
+client_host = []
 tickets = []
+net_diagnostics = ["dep:portmapper"]
 ssh-key = [
     "dep:ssh-key"
 ]
@@ -69,3 +75,7 @@ simulation = [
 [[example]]
 name = "tickets"
 required-features = ["tickets"]
+
+[[example]]
+name = "net_diagnostics"
+required-features = ["net_diagnostics", "client_host"]

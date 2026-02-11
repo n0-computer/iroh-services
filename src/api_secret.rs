@@ -1,9 +1,11 @@
 use std::{
     collections::BTreeSet,
+    env::VarError,
     fmt::{self, Display},
     str::FromStr,
 };
 
+use anyhow::{Context, anyhow};
 use iroh::{EndpointAddr, EndpointId, SecretKey, TransportAddr};
 use iroh_tickets::{ParseError, Ticket};
 use serde::{Deserialize, Serialize};
@@ -85,6 +87,19 @@ impl ApiSecret {
         Self {
             secret,
             remote: remote.into(),
+        }
+    }
+
+    /// Read an Api Secret from a given environment variable
+    pub fn from_env_var(env_var: &str) -> anyhow::Result<Self> {
+        match std::env::var(env_var) {
+            Ok(ticket_string) => Self::from_str(&ticket_string)
+                .context(format!("invalid api secret at env var {env_var}")),
+            Err(VarError::NotPresent) => Err(anyhow!("{env_var} environment variable is not set")),
+            Err(VarError::NotUnicode(e)) => Err(anyhow!(
+                "{env_var} environment variable is not valid unicode: {:?}",
+                e
+            )),
         }
     }
 

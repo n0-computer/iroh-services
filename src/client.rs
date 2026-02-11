@@ -1,5 +1,4 @@
 use std::{
-    env::VarError,
     str::FromStr,
     sync::{Arc, RwLock},
 };
@@ -17,6 +16,10 @@ use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
+#[cfg(feature = "net_diagnostics")]
+use crate::net_diagnostics::{DiagnosticsReport, checks::run_diagnostics};
+#[cfg(feature = "net_diagnostics")]
+use crate::protocol::PutNetworkDiagnostics;
 #[cfg(feature = "tickets")]
 use crate::protocol::{GetTicket, ListTickets, PublishTicket, TicketData, UnpublishTicket};
 use crate::{
@@ -47,10 +50,13 @@ use crate::{
 /// ```
 ///
 /// [`ApiSecret`]: crate::api_secret::ApiSecret
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Client {
+    // owned clone of the endpoint for diagnostics, and for connection restarts on actor close
+    #[allow(dead_code)]
+    endpoint: Endpoint,
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
-    _actor_task: AbortOnDropHandle<()>,
+    _actor_task: Arc<AbortOnDropHandle<()>>,
 }
 
 /// ClientBuilder provides configures and builds a n0des client, typically
@@ -66,7 +72,7 @@ pub struct ClientBuilder {
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
-const API_SECRET_ENV_VAR_NAME: &str = "N0DES_API_SECRET";
+pub const API_SECRET_ENV_VAR_NAME: &str = "N0DES_API_SECRET";
 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
@@ -107,20 +113,8 @@ impl ClientBuilder {
 
     /// Check N0DES_API_SECRET environment variable for a valid API secret
     pub fn api_secret_from_env(self) -> Result<Self> {
-        match std::env::var(API_SECRET_ENV_VAR_NAME) {
-            Ok(ticket_string) => {
-                let ticket = ApiSecret::from_str(&ticket_string)
-                    .context("invalid {API_SECRET_ENV_VAR_NAME}")?;
-                self.api_secret(ticket)
-            }
-            Err(VarError::NotPresent) => Err(anyhow!(
-                "{API_SECRET_ENV_VAR_NAME} environment variable is not set"
-            )),
-            Err(VarError::NotUnicode(e)) => Err(anyhow!(
-                "{API_SECRET_ENV_VAR_NAME} environment variable is not valid unicode: {:?}",
-                e
-            )),
-        }
+        let ticket = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
+        self.api_secret(ticket)
     }
 
     /// set client API secret from an encoded string
@@ -196,7 +190,7 @@ impl ClientBuilder {
         let remote = self.remote.ok_or(BuildError::MissingRemote)?;
         let capabilities = self.cap.ok_or(BuildError::MissingCapability)?;
 
-        let conn = IrohLazyRemoteConnection::new(self.endpoint, remote, ALPN.to_vec());
+        let conn = IrohLazyRemoteConnection::new(self.endpoint.clone(), remote, ALPN.to_vec());
         let client = N0desClient::boxed(conn);
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -212,8 +206,9 @@ impl ClientBuilder {
         ));
 
         Ok(Client {
+            endpoint: self.endpoint,
             message_channel: tx,
-            _actor_task: metrics_task,
+            _actor_task: Arc::new(metrics_task),
         })
     }
 }
@@ -291,6 +286,58 @@ impl Client {
         rx.await
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
             .map_err(Error::Remote)
+    }
+
+    /// Grant capabilities to a remote endpoint. Creates a signed RCAN token
+    /// and sends it to n0des for storage. The remote can then use this token
+    /// when dialing back to authorize its requests.
+    #[cfg(feature = "client_host")]
+    pub async fn grant_capability(
+        &self,
+        remote_id: EndpointId,
+        caps: impl IntoIterator<Item = impl Into<crate::caps::Cap>>,
+    ) -> Result<(), Error> {
+        let cap = crate::caps::create_grant_token(
+            self.endpoint.secret_key().clone(),
+            remote_id,
+            DEFAULT_CAP_EXPIRY,
+            Caps::new(caps),
+        )
+        .map_err(Error::Other)?;
+
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::GrantCap {
+                cap: Box::new(cap),
+                done: tx,
+            })
+            .await
+            .map_err(|_| Error::Other(anyhow!("granting capability")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+    }
+
+    /// run local network status diagnostics, optionally uploading the results
+    #[cfg(feature = "net_diagnostics")]
+    pub async fn net_diagnostics(&self, send: bool) -> Result<DiagnosticsReport, Error> {
+        let report = run_diagnostics(&self.endpoint).await?;
+        if send {
+            let (tx, rx) = oneshot::channel();
+            self.message_channel
+                .send(ClientActorMessage::PutNetworkDiagnostics {
+                    done: tx,
+                    report: Box::new(report.clone()),
+                })
+                .await
+                .map_err(|_| Error::Other(anyhow!("sending network diagnostics report")))?;
+
+            let _ = rx
+                .await
+                .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?;
+        }
+
+        Ok(report)
     }
 
     /// Publish a [ticket] to n0des so others can find it by calling fetch_tickets.
@@ -432,6 +479,18 @@ enum ClientActorMessage {
     Ping {
         done: oneshot::Sender<Result<Pong, RemoteError>>,
     },
+    // GrantCap is used by the `client_host` feature flag
+    #[allow(dead_code)]
+    GrantCap {
+        // boxed to avoid large enum variants
+        cap: Box<Rcan<Caps>>,
+        done: oneshot::Sender<Result<(), Error>>,
+    },
+    #[cfg(feature = "net_diagnostics")]
+    PutNetworkDiagnostics {
+        report: Box<DiagnosticsReport>,
+        done: oneshot::Sender<Result<(), Error>>,
+    },
     #[cfg(feature = "tickets")]
     PublishTicket {
         name: String,
@@ -507,6 +566,19 @@ impl ClientActor {
                             if let Err(err) = done.send(res) {
                                 debug!("failed to push metrics: {:#?}", err);
                                 self.authorized = false;
+                            }
+                        }
+                        ClientActorMessage::GrantCap{ cap, done } => {
+                            let res = self.grant_cap(*cap).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to grant capability: {:#?}", err);
+                            }
+                        }
+                        #[cfg(feature = "net_diagnostics")]
+                        ClientActorMessage::PutNetworkDiagnostics{ report, done } => {
+                            let res = self.put_network_diagnostics(*report).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to publish network diagnostics: {:#?}", err);
                             }
                         }
                         #[cfg(feature = "tickets")]
@@ -595,6 +667,36 @@ impl ClientActor {
             session_id: self.session_id,
             update,
         };
+
+        self.client
+            .rpc(req)
+            .await
+            .map_err(|_| RemoteError::InternalServerError)??;
+
+        Ok(())
+    }
+
+    async fn grant_cap(&mut self, cap: Rcan<Caps>) -> Result<(), Error> {
+        trace!("client actor grant capability");
+        self.auth().await?;
+
+        self.client
+            .rpc(crate::protocol::GrantCap { cap })
+            .await
+            .map_err(|_| RemoteError::InternalServerError)??;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "net_diagnostics")]
+    async fn put_network_diagnostics(
+        &mut self,
+        report: crate::net_diagnostics::DiagnosticsReport,
+    ) -> Result<(), Error> {
+        trace!("client actor publish network diagnostics");
+        self.auth().await?;
+
+        let req = PutNetworkDiagnostics { report };
 
         self.client
             .rpc(req)

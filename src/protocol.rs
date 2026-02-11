@@ -4,8 +4,9 @@ use rcan::Rcan;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::caps::Caps;
+use crate::{caps::Caps, net_diagnostics::DiagnosticsReport};
 
+/// The main ALPN for connecting from the client to the cloud node.
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
 
 pub type N0desClient = irpc::Client<N0desProtocol>;
@@ -29,6 +30,23 @@ pub enum N0desProtocol {
     TicketGet(GetTicket),
     #[rpc(tx=oneshot::Sender<RemoteResult<Vec<TicketData>>>)]
     TicketList(ListTickets),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    PutNetworkDiagnostics(PutNetworkDiagnostics),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    GrantCap(GrantCap),
+}
+
+/// Dedicated protocol for cloud-to-endpoint net diagnostics connections.
+#[rpc_requests(message = NetDiagnosticsMessage)]
+#[derive(Debug, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
+pub enum ClientHostProtocol {
+    #[rpc(tx=oneshot::Sender<()>)]
+    Auth(Auth),
+    #[rpc(tx=oneshot::Sender<RemoteResult<DiagnosticsReport>>)]
+    RunNetworkDiagnostics(RunNetworkDiagnostics),
 }
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
@@ -120,4 +138,23 @@ impl From<PublishTicket> for TicketData {
             ticket_bytes: msg.ticket,
         }
     }
+}
+
+/// Publishing network diagnostics
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PutNetworkDiagnostics {
+    pub report: crate::net_diagnostics::DiagnosticsReport,
+}
+
+/// ask this node to run diagnostics & return the result.
+/// present even without the net_diagnostics feature flag because the request
+/// struct is empty in both cases
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RunNetworkDiagnostics;
+
+/// Grant a capability token to the remote endpoint. The remote should store
+/// the RCAN and use it when dialing back to authorize its requests.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GrantCap {
+    pub cap: Rcan<Caps>,
 }
