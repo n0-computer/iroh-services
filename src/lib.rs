@@ -27,7 +27,10 @@
 //!
 //! [n0des]: https://n0des.iroh.computer
 //! [iroh]: https://iroh.computer
+
 mod client;
+#[cfg(feature = "client_host")]
+mod client_host;
 
 pub mod api_secret;
 pub mod caps;
@@ -51,9 +54,9 @@ pub static IROH_VERSION: std::sync::LazyLock<&str> = std::sync::LazyLock::new(||
 });
 
 pub use anyhow;
-pub use iroh_metrics::Registry;
 #[cfg(feature = "client_host")]
-pub use protocol::client_host::{ClientHost, DiagnosticsHost};
+pub use client_host::{CLIENT_HOST_ALPN, ClientHost, ClientHostClient};
+pub use iroh_metrics::Registry;
 
 #[cfg(feature = "tickets")]
 pub use self::client::PublishedTicket;
@@ -62,5 +65,5 @@ pub use self::net_diagnostics::{DiagnosticsReport, checks::run_diagnostics};
 pub use self::{
     api_secret::ApiSecret,
     client::{API_SECRET_ENV_VAR_NAME, Client, ClientBuilder},
-    protocol::{ALPN, NET_DIAGNOSTICS_ALPN, NetDiagnosticsClient},
+    protocol::ALPN,
 };
