@@ -18,7 +18,9 @@ pub struct DiagnosticsReport {
     pub net_report: Option<NetReport>,
     pub direct_addrs: Vec<SocketAddr>,
     pub portmap_probe: Option<PortMapProbe>,
+    #[serde(default)]
     pub iroh_version: String,
+    #[serde(default)]
     pub iroh_n0des_version: String,
 }
 
