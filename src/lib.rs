@@ -28,6 +28,7 @@
 //! [iroh-services]: https://services.iroh.computer
 //! [iroh]: https://iroh.computer
 
+pub mod alerts;
 mod client;
 #[cfg(feature = "client_host")]
 mod client_host;
@@ -61,6 +62,7 @@ pub use iroh_metrics::Registry;
 #[cfg(feature = "net_diagnostics")]
 pub use self::net_diagnostics::{DiagnosticsReport, checks::run_diagnostics};
 pub use self::{
+    alerts::LogMonitor,
     api_secret::ApiSecret,
     client::{API_SECRET_ENV_VAR_NAME, Client, ClientBuilder},
     protocol::ALPN,

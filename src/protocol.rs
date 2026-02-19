@@ -27,6 +27,9 @@ pub enum IrohServicesProtocol {
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     GrantCap(GrantCap),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    SendAlert(SendAlert),
 }
 
 /// Dedicated protocol for cloud-to-endpoint net diagnostics connections.
@@ -94,4 +97,38 @@ pub struct RunNetworkDiagnostics;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GrantCap {
     pub cap: Rcan<Caps>,
+}
+
+/// Information about a captured error-level log event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertInfo {
+    pub target: String,
+    pub message: String,
+    pub file: Option<String>,
+    pub line: Option<u32>,
+    pub timestamp_ms: u64,
+    #[serde(default)]
+    pub iroh_version: String,
+    #[serde(default)]
+    pub iroh_n0des_version: String,
+    /// Up to 200 recent log messages captured before this error, providing
+    /// context for what led to the alert.
+    #[serde(default)]
+    pub context: Vec<LogEntry>,
+}
+
+/// A single log entry captured in the context ring buffer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub level: String,
+    pub target: String,
+    pub message: String,
+    pub timestamp_ms: u64,
+}
+
+/// Send an alert to n0des when an error-level log event is captured.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SendAlert {
+    pub session_id: Uuid,
+    pub alert: AlertInfo,
 }

@@ -81,6 +81,8 @@ pub enum Cap {
     Metrics(MetricsCap),
     #[strum(to_string = "net-diagnostics:{0}")]
     NetDiagnostics(NetDiagnosticsCap),
+    #[strum(to_string = "alerts:{0}")]
+    Alerts(AlertsCap),
 }
 
 impl FromStr for Cap {
@@ -94,6 +96,7 @@ impl FromStr for Cap {
                 "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
                 "relay" => Self::Relay(RelayCap::from_str(inner)?),
                 "net-diagnostics" => Self::NetDiagnostics(NetDiagnosticsCap::from_str(inner)?),
+                "alerts" => Self::Alerts(AlertsCap::from_str(inner)?),
                 _ => bail!("invalid cap domain"),
             })
         } else {
@@ -118,6 +121,12 @@ cap_enum!(
     pub enum NetDiagnosticsCap {
         PutAny,
         GetAny,
+    }
+);
+
+cap_enum!(
+    pub enum AlertsCap {
+        PutAny,
     }
 );
 
@@ -179,6 +188,7 @@ impl Capability for Cap {
             (Cap::Relay(slf), Cap::Relay(other)) => slf.permits(other),
             (Cap::Metrics(slf), Cap::Metrics(other)) => slf.permits(other),
             (Cap::NetDiagnostics(slf), Cap::NetDiagnostics(other)) => slf.permits(other),
+            (Cap::Alerts(slf), Cap::Alerts(other)) => slf.permits(other),
             (_, _) => false,
         }
     }
@@ -192,6 +202,7 @@ fn client_capabilities(other: &Cap) -> bool {
         Cap::Metrics(MetricsCap::PutAny) => true,
         Cap::NetDiagnostics(NetDiagnosticsCap::PutAny) => true,
         Cap::NetDiagnostics(NetDiagnosticsCap::GetAny) => true,
+        Cap::Alerts(AlertsCap::PutAny) => true,
     }
 }
 
@@ -217,6 +228,14 @@ impl Capability for NetDiagnosticsCap {
             (NetDiagnosticsCap::PutAny, NetDiagnosticsCap::PutAny) => true,
             (NetDiagnosticsCap::GetAny, NetDiagnosticsCap::GetAny) => true,
             (_, _) => false,
+        }
+    }
+}
+
+impl Capability for AlertsCap {
+    fn permits(&self, other: &Self) -> bool {
+        match (self, other) {
+            (AlertsCap::PutAny, AlertsCap::PutAny) => true,
         }
     }
 }
