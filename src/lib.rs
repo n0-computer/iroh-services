@@ -58,8 +58,6 @@ pub use anyhow;
 pub use client_host::{CLIENT_HOST_ALPN, ClientHost, ClientHostClient};
 pub use iroh_metrics::Registry;
 
-#[cfg(feature = "tickets")]
-pub use self::client::PublishedTicket;
 #[cfg(feature = "net_diagnostics")]
 pub use self::net_diagnostics::{DiagnosticsReport, checks::run_diagnostics};
 pub use self::{

@@ -23,15 +23,6 @@ pub enum N0desProtocol {
     Ping(Ping),
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
-    TicketPublish(PublishTicket),
-    #[rpc(tx=oneshot::Sender<RemoteResult<bool>>)]
-    TicketUnpublish(UnpublishTicket),
-    #[rpc(tx=oneshot::Sender<RemoteResult<Option<TicketData>>>)]
-    TicketGet(GetTicket),
-    #[rpc(tx=oneshot::Sender<RemoteResult<Vec<TicketData>>>)]
-    TicketList(ListTickets),
-
-    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     PutNetworkDiagnostics(PutNetworkDiagnostics),
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
@@ -84,60 +75,6 @@ pub struct Ping {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Pong {
     pub req_id: [u8; 16],
-}
-
-/// Publishing a ticket allows n0des to act as a central hub to ferry tickets
-/// between endpoints.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PublishTicket {
-    pub req_id: [u8; 16],
-    pub name: String,
-    pub ticket_kind: String,
-    pub ticket: Vec<u8>,
-}
-
-/// wire-level request to remove a ticket. Useful for undos, and any situation
-/// where the uptime of the endpoint outlasts the utility of the ticket.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UnpublishTicket {
-    pub req_id: [u8; 16],
-    pub name: String,
-    pub ticket_kind: String,
-}
-
-/// wire-level request get a ticket by name.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetTicket {
-    pub req_id: [u8; 16],
-    pub name: String,
-    pub ticket_kind: String,
-}
-
-/// Wire format for requesting a list of tickets
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ListTickets {
-    pub req_id: [u8; 16],
-    pub ticket_kind: String,
-    pub offset: u32,
-    pub limit: u32,
-}
-
-/// Signals are opaque data that n0des can ferry between endpoints
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TicketData {
-    pub name: String,
-    pub ticket_kind: String,
-    pub ticket_bytes: Vec<u8>,
-}
-
-impl From<PublishTicket> for TicketData {
-    fn from(msg: PublishTicket) -> Self {
-        TicketData {
-            name: msg.name,
-            ticket_kind: msg.ticket_kind,
-            ticket_bytes: msg.ticket,
-        }
-    }
 }
 
 /// Publishing network diagnostics
