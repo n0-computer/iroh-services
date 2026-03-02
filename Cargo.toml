@@ -61,7 +61,6 @@ tokio = { version = "1.45", features = ["macros", "rt", "rt-multi-thread"] }
 default = ["client"]
 client = []
 client_host = []
-tickets = []
 net_diagnostics = ["dep:portmapper"]
 ssh-key = [
     "dep:ssh-key"
@@ -71,10 +70,6 @@ simulation = [
  "dep:time",
  "dep:tokio-util"
 ]
-
-[[example]]
-name = "tickets"
-required-features = ["tickets"]
 
 [[example]]
 name = "net_diagnostics"
