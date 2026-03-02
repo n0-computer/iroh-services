@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ALPN"],"enum":["ClientHostProtocol","N0desMessage","N0desProtocol","NetDiagnosticsMessage","RemoteError"],"struct":["Auth","GrantCap","Ping","Pong","PutMetrics","PutNetworkDiagnostics","RunNetworkDiagnostics"],"type":["N0desClient","RemoteResult"]};
