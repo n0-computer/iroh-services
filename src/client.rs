@@ -21,21 +21,21 @@ use crate::protocol::PutNetworkDiagnostics;
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{ALPN, Auth, N0desClient, Ping, Pong, PutMetrics, RemoteError},
+    protocol::{ALPN, Auth, IrohServicesClient, Ping, Pong, PutMetrics, RemoteError},
 };
 
-/// Client is the main handle for interacting with n0des. It communicates with
-/// n0des entirely through an iroh endpoint, and is configured through a builder.
+/// Client is the main handle for interacting with iroh-services. It communicates with
+/// iroh-services entirely through an iroh endpoint, and is configured through a builder.
 /// Client requires either an Ssh Key or [`ApiSecret`]
 ///
 /// ```no_run
-/// use iroh_n0des::Client;
+/// use iroh_services::Client;
 ///
 /// async fn build_client() -> anyhow::Result<()> {
 ///     let endpoint = iroh::Endpoint::bind().await?;
 ///
-///     // needs N0DES_API_SECRET set to an environment variable
-///     // client will now push endpoint metrics to n0des.
+///     // needs IROH_SERVICES_API_SECRET set to an environment variable
+///     // client will now push endpoint metrics to iroh-services.
 ///     let client = Client::builder(&endpoint)
 ///         .api_secret_from_str("MY_API_SECRET")?
 ///         .build()
@@ -55,7 +55,7 @@ pub struct Client {
     _actor_task: Arc<AbortOnDropHandle<()>>,
 }
 
-/// ClientBuilder provides configures and builds a n0des client, typically
+/// ClientBuilder provides configures and builds a iroh-services client, typically
 /// created with [`Client::builder`]
 pub struct ClientBuilder {
     #[allow(dead_code)]
@@ -68,7 +68,7 @@ pub struct ClientBuilder {
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
-pub const API_SECRET_ENV_VAR_NAME: &str = "N0DES_API_SECRET";
+pub const API_SECRET_ENV_VAR_NAME: &str = "IROH_SERVICES_API_SECRET";
 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
@@ -85,7 +85,7 @@ impl ClientBuilder {
         }
     }
 
-    /// Register a metrics group to forward to n0des
+    /// Register a metrics group to forward to iroh-services
     ///
     /// The default registered metrics uses only the endpoint
     pub fn register_metrics_group(mut self, metrics_group: Arc<dyn MetricsGroup>) -> Self {
@@ -107,7 +107,7 @@ impl ClientBuilder {
         self
     }
 
-    /// Check N0DES_API_SECRET environment variable for a valid API secret
+    /// Check IROH_SERVICES_API_SECRET environment variable for a valid API secret
     pub fn api_secret_from_env(self) -> Result<Self> {
         let ticket = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
         self.api_secret(ticket)
@@ -115,12 +115,12 @@ impl ClientBuilder {
 
     /// set client API secret from an encoded string
     pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self> {
-        let key = ApiSecret::from_str(secret_key).context("invalid n0des api secret")?;
+        let key = ApiSecret::from_str(secret_key).context("invalid iroh services api secret")?;
         self.api_secret(key)
     }
 
-    /// Use a shared secret & remote n0des endpoint ID contained within a ticket
-    /// to construct a n0des client. The resulting client will have "Client"
+    /// Use a shared secret & remote iroh-services endpoint ID contained within a ticket
+    /// to construct a iroh-services client. The resulting client will have "Client"
     /// capabilities.
     ///
     /// API secrets include remote details within them, and will set both the
@@ -182,12 +182,12 @@ impl ClientBuilder {
     /// Create a new client, connected to the provide service node
     #[must_use = "dropping the client will silently cancel all client tasks"]
     pub async fn build(self) -> Result<Client, BuildError> {
-        debug!("starting iroh-n0des client");
+        debug!("starting iroh-services client");
         let remote = self.remote.ok_or(BuildError::MissingRemote)?;
         let capabilities = self.cap.ok_or(BuildError::MissingCapability)?;
 
         let conn = IrohLazyRemoteConnection::new(self.endpoint.clone(), remote, ALPN.to_vec());
-        let client = N0desClient::boxed(conn);
+        let client = IrohServicesClient::boxed(conn);
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         let metrics_task = AbortOnDropHandle::new(n0_future::task::spawn(
@@ -268,7 +268,7 @@ impl Client {
             .map_err(Error::Remote)
     }
 
-    /// immediately send a single dump of metrics to n0des. It's not necessary
+    /// immediately send a single dump of metrics to iroh-services. It's not necessary
     /// to call this function if you're using a non-zero metrics interval,
     /// which will automatically propagate metrics on the set interval for you
     pub async fn push_metrics(&self) -> Result<(), Error> {
@@ -284,7 +284,7 @@ impl Client {
     }
 
     /// Grant capabilities to a remote endpoint. Creates a signed RCAN token
-    /// and sends it to n0des for storage. The remote can then use this token
+    /// and sends it to iroh-services for storage. The remote can then use this token
     /// when dialing back to authorize its requests.
     #[cfg(feature = "client_host")]
     pub async fn grant_capability(
@@ -359,7 +359,7 @@ enum ClientActorMessage {
 
 struct ClientActor {
     capabilities: Rcan<Caps>,
-    client: N0desClient,
+    client: IrohServicesClient,
     session_id: Uuid,
     authorized: bool,
 }

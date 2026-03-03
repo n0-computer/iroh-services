@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// The ALPN for sending messages from the cloud node to the client.
-pub const CLIENT_HOST_ALPN: &[u8] = b"n0/n0des-client-host/1";
+pub const CLIENT_HOST_ALPN: &[u8] = b"n0/services-client-host/1";
 
 pub type ClientHostClient = irpc::Client<ClientHostProtocol>;
 
@@ -153,7 +153,7 @@ mod tests {
     use crate::{
         ALPN,
         caps::create_grant_token,
-        protocol::{Auth, N0desClient, RunNetworkDiagnostics},
+        protocol::{Auth, IrohServicesClient, RunNetworkDiagnostics},
     };
 
     #[tokio::test]
@@ -236,7 +236,7 @@ mod tests {
 
         let conn =
             IrohLazyRemoteConnection::new(client_ep.clone(), server_ep.addr(), ALPN.to_vec());
-        let client = N0desClient::boxed(conn);
+        let client = IrohServicesClient::boxed(conn);
 
         // auth should fail because the RCAN issuer is the client, not the server
         let result = client.rpc(Auth { caps: rcan }).await;

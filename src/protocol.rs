@@ -7,14 +7,14 @@ use uuid::Uuid;
 use crate::{caps::Caps, net_diagnostics::DiagnosticsReport};
 
 /// The main ALPN for connecting from the client to the cloud node.
-pub const ALPN: &[u8] = b"/iroh/n0des/1";
+pub const ALPN: &[u8] = b"/iroh/services/1";
 
-pub type N0desClient = irpc::Client<N0desProtocol>;
+pub type IrohServicesClient = irpc::Client<IrohServicesProtocol>;
 
-#[rpc_requests(message = N0desMessage)]
+#[rpc_requests(message = ServicesMessage)]
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
-pub enum N0desProtocol {
+pub enum IrohServicesProtocol {
     #[rpc(tx=oneshot::Sender<()>)]
     Auth(Auth),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
