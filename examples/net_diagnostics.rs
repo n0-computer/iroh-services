@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
             .grant_capability(remote_id, vec![NetDiagnosticsCap::GetAny])
             .await
         {
-            eprintln!("Failed to grant capabillity: {err:?}");
+            eprintln!("Failed to grant capability: {err:?}");
         }
     });
 
