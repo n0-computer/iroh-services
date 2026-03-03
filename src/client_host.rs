@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// The ALPN for sending messages from the cloud node to the client.
-pub const CLIENT_HOST_ALPN: &[u8] = b"n0/services-client-host/1";
+pub const CLIENT_HOST_ALPN: &[u8] = b"n0/n0des-client-host/1";
 
 pub type ClientHostClient = irpc::Client<ClientHostProtocol>;
 

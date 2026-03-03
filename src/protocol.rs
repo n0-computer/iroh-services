@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::{caps::Caps, net_diagnostics::DiagnosticsReport};
 
 /// The main ALPN for connecting from the client to the cloud node.
-pub const ALPN: &[u8] = b"/iroh/services/1";
+pub const ALPN: &[u8] = b"/iroh/n0des/1";
 
 pub type IrohServicesClient = irpc::Client<IrohServicesProtocol>;
 
