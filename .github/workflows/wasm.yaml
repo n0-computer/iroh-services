@@ -45,4 +45,4 @@ jobs:
       # some non-Wasm-compatible code made it into the final code.
       - name: Ensure no 'import "env"' in Wasm
         run: |
-          ! wasm-tools print --skeleton target/wasm32-unknown-unknown/debug/iroh_n0des.wasm | grep 'import "env"'
+          ! wasm-tools print --skeleton target/wasm32-unknown-unknown/debug/iroh_services.wasm | grep 'import "env"'

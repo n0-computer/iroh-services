@@ -173,7 +173,7 @@ jobs:
         # uses: obi1kenobi/cargo-semver-checks-action@v2
         uses: n0-computer/cargo-semver-checks-action@feat-baseline
         with:
-          package: iroh-n0des
+          package: iroh-services
           baseline-rev: ${{ env.HEAD_COMMIT_SHA }}
           use-cache: false
 
@@ -208,7 +208,7 @@ jobs:
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: iroh-n0des docs
+      - name: iroh-services docs
         run: cargo docs-rs
 
   clippy_check:

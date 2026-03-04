@@ -126,7 +126,7 @@ impl Caps {
         Self::V0(CapSet::new(caps))
     }
 
-    /// the class of capabilities that n0des will accept when deriving from a
+    /// the class of capabilities that services will accept when deriving from a
     /// shared secret like an [ApiSecret]. These should be "client" capabilities:
     /// typically for users of an app
     ///
@@ -135,8 +135,8 @@ impl Caps {
         Self::new([Cap::Client])
     }
 
-    /// The maximum set of capabilities. n0des will only accept these capabilities
-    /// when deriving from a secret that is registered with n0des, like an SSH key
+    /// The maximum set of capabilities. services will only accept these capabilities
+    /// when deriving from a secret that is registered with services, like an SSH key
     pub fn all() -> Self {
         Self::new([Cap::All])
     }
