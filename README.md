@@ -1,6 +1,31 @@
-# iroh-n0des
+# iroh-services
 
-An iroh protocol to interact with n0des, using iroh itself.
+Client library for interacting with [iroh](https://services.iroh.computer). Clients attach to the endpoint in your app to add features like metrics aggregation, network diagnostics, etc.
+
+```rust
+use iroh::Endpoint;
+use iroh_services::Client;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let endpoint = Endpoint::bind().await?;
+
+    // needs IROH_SERVICES_API_KEY set to an environment variable
+    // as long as client variable is not dropped it wil
+    // push endpoint metrics to iroh services in the background, by default
+    // every 60 seconds
+    let client = Client::builder(&endpoint)
+        .api_key_from_env()?
+        .build()
+        .await?;
+
+    // we can also ping the service just to confirm everything is working
+    client.ping().await?;
+
+    Ok(())
+}
+```
+
 
 ## License
 

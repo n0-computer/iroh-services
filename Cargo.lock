@@ -1573,43 +1573,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "iroh-n0des"
-version = "0.10.0"
-dependencies = [
- "anyhow",
- "built",
- "bytes",
- "derive_more",
- "ed25519-dalek",
- "futures-buffered",
- "getrandom 0.3.4",
- "iroh",
- "iroh-metrics",
- "iroh-quinn",
- "iroh-tickets",
- "irpc",
- "irpc-iroh",
- "n0-error",
- "n0-future",
- "portmapper",
- "postcard",
- "rand",
- "rcan",
- "serde",
- "serde_json",
- "ssh-key",
- "strum",
- "temp_env_vars",
- "thiserror",
- "time",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "iroh-quinn"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1714,6 +1677,43 @@ dependencies = [
  "webpki-roots",
  "ws_stream_wasm",
  "z32",
+]
+
+[[package]]
+name = "iroh-services"
+version = "0.10.0"
+dependencies = [
+ "anyhow",
+ "built",
+ "bytes",
+ "derive_more",
+ "ed25519-dalek",
+ "futures-buffered",
+ "getrandom 0.3.4",
+ "iroh",
+ "iroh-metrics",
+ "iroh-quinn",
+ "iroh-tickets",
+ "irpc",
+ "irpc-iroh",
+ "n0-error",
+ "n0-future",
+ "portmapper",
+ "postcard",
+ "rand",
+ "rcan",
+ "serde",
+ "serde_json",
+ "ssh-key",
+ "strum",
+ "temp_env_vars",
+ "thiserror",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

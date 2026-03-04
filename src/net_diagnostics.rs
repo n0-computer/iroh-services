@@ -21,7 +21,7 @@ pub struct DiagnosticsReport {
     #[serde(default)]
     pub iroh_version: String,
     #[serde(default)]
-    pub iroh_n0des_version: String,
+    pub iroh_services_version: String,
 }
 
 /// Port mapping protocol availability on the LAN.
@@ -95,7 +95,7 @@ pub mod checks {
             direct_addrs,
             portmap_probe,
             iroh_version: crate::IROH_VERSION.to_string(),
-            iroh_n0des_version: crate::IROH_N0DES_VERSION.to_string(),
+            iroh_services_version: crate::IROH_SERVICES_VERSION.to_string(),
         })
     }
 
