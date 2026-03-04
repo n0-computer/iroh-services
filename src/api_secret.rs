@@ -10,13 +10,13 @@ use iroh::{EndpointAddr, EndpointId, SecretKey, TransportAddr};
 use iroh_tickets::{ParseError, Ticket};
 use serde::{Deserialize, Serialize};
 
-/// The secret material used to connect your n0des.iroh.computer project. The
+/// The secret material used to connect your services.iroh.computer project. The
 /// value of these should be treated like any other API key: guard them carefully.
 #[derive(Debug, Clone)]
 pub struct ApiSecret {
     /// ED25519 secret used to construct rcans from
     pub secret: SecretKey,
-    /// the n0des endpoint to direct requests to
+    /// The iroh-services endpoint to direct requests to
     pub remote: EndpointAddr,
 }
 
@@ -35,11 +35,11 @@ struct Variant0EndpointAddr {
 /// Wire format for [`Ticket`].
 #[derive(Serialize, Deserialize)]
 enum TicketWireFormat {
-    Variant0(Variant0N0desTicket),
+    Variant0(Variant0ServicesTicket),
 }
 
 #[derive(Serialize, Deserialize)]
-struct Variant0N0desTicket {
+struct Variant0ServicesTicket {
     secret: SecretKey,
     addr: Variant0EndpointAddr,
 }
@@ -47,10 +47,10 @@ struct Variant0N0desTicket {
 impl Ticket for ApiSecret {
     // KIND is the constant that's added to the front of a serialized ticket
     // string. It should be a short, human readable string
-    const KIND: &'static str = "n0des";
+    const KIND: &'static str = "services";
 
     fn to_bytes(&self) -> Vec<u8> {
-        let data = TicketWireFormat::Variant0(Variant0N0desTicket {
+        let data = TicketWireFormat::Variant0(Variant0ServicesTicket {
             secret: self.secret.clone(),
             addr: Variant0EndpointAddr {
                 endpoint_id: self.remote.id,
@@ -62,7 +62,7 @@ impl Ticket for ApiSecret {
 
     fn from_bytes(bytes: &[u8]) -> Result<Self, ParseError> {
         let res: TicketWireFormat = postcard::from_bytes(bytes)?;
-        let TicketWireFormat::Variant0(Variant0N0desTicket { secret, addr }) = res;
+        let TicketWireFormat::Variant0(Variant0ServicesTicket { secret, addr }) = res;
         Ok(Self {
             secret,
             remote: EndpointAddr {

@@ -1,10 +1,10 @@
-# iroh-n0des
+# iroh-services
 
-An iroh protocol to interact with n0des, using iroh itself.
+An iroh protocol to interact with iroh-services, using iroh itself.
 
 ## License
 
-Copyright 2025 N0, INC.
+Copyright 2026 N0, INC.
 
 This project is licensed under either of
 
