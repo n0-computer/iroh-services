@@ -12,8 +12,7 @@
 use anyhow::Result;
 use iroh::{Endpoint, protocol::Router};
 use iroh_services::{
-    API_SECRET_ENV_VAR_NAME, ApiSecret, CLIENT_HOST_ALPN, Client, ClientHost,
-    caps::NetDiagnosticsCap,
+    API_KEY_ENV_VAR_NAME, ApiKey, CLIENT_HOST_ALPN, Client, ClientHost, caps::NetDiagnosticsCap,
 };
 
 #[tokio::main]
@@ -24,11 +23,11 @@ async fn main() -> Result<()> {
 
     // 2. Parse the ApiSecret separately so we can extract the remote
     //    EndpointID. Normally we'd pass it straight to the client builder.
-    let secret = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
+    let secret = ApiKey::from_env_var(API_KEY_ENV_VAR_NAME)?;
 
     // 3. Build a Client that dials services (as in all other examples).
     let client = Client::builder(&endpoint)
-        .api_secret(secret.clone())?
+        .api_key(secret.clone())?
         .build()
         .await?;
 

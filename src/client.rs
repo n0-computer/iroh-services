@@ -19,7 +19,7 @@ use crate::net_diagnostics::{DiagnosticsReport, checks::run_diagnostics};
 #[cfg(feature = "net_diagnostics")]
 use crate::protocol::PutNetworkDiagnostics;
 use crate::{
-    api_secret::ApiSecret,
+    api_key::ApiKey,
     caps::Caps,
     protocol::{ALPN, Auth, Ping, Pong, PutMetrics, RemoteError, ServicesClient},
 };
@@ -37,7 +37,7 @@ use crate::{
 ///     // needs IROH_SERVICES_API_KEY set to an environment variable
 ///     // client will now push endpoint metrics to services.
 ///     let client = Client::builder(&endpoint)
-///         .api_secret_from_str("MY_API_SECRET")?
+///         .api_key_from_str("MY_API_key")?
 ///         .build()
 ///         .await;
 ///
@@ -45,7 +45,7 @@ use crate::{
 /// }
 /// ```
 ///
-/// [`ApiSecret`]: crate::api_secret::ApiSecret
+/// [`ApiSecret`]: crate::api_key::ApiSecret
 #[derive(Debug, Clone)]
 pub struct Client {
     // owned clone of the endpoint for diagnostics, and for connection restarts on actor close
@@ -68,7 +68,7 @@ pub struct ClientBuilder {
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
-pub const API_SECRET_ENV_VAR_NAME: &str = "IROH_SERVICES_API_KEY";
+pub const API_KEY_ENV_VAR_NAME: &str = "IROH_SERVICES_API_KEY";
 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
@@ -108,15 +108,15 @@ impl ClientBuilder {
     }
 
     /// Check IROH_SERVICES_API_KEY environment variable for a valid API secret
-    pub fn api_secret_from_env(self) -> Result<Self> {
-        let ticket = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
-        self.api_secret(ticket)
+    pub fn api_key_from_env(self) -> Result<Self> {
+        let ticket = ApiKey::from_env_var(API_KEY_ENV_VAR_NAME)?;
+        self.api_key(ticket)
     }
 
     /// set client API secret from an encoded string
-    pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self> {
-        let key = ApiSecret::from_str(secret_key).context("invalid services api secret")?;
-        self.api_secret(key)
+    pub fn api_key_from_str(self, secret_key: &str) -> Result<Self> {
+        let key = ApiKey::from_str(secret_key).context("invalid services api secret")?;
+        self.api_key(key)
     }
 
     /// Use a shared secret & remote services endpoint ID contained within a ticket
@@ -125,7 +125,7 @@ impl ClientBuilder {
     ///
     /// API secrets include remote details within them, and will set both the
     /// remote and rcan values on the builder
-    pub fn api_secret(mut self, ticket: ApiSecret) -> Result<Self> {
+    pub fn api_key(mut self, ticket: ApiKey) -> Result<Self> {
         let local_id = self.endpoint.id();
         let rcan = crate::caps::create_api_token_from_secret_key(
             ticket.secret,
@@ -173,7 +173,7 @@ impl ClientBuilder {
     }
 
     /// Sets the remote to dial, must be provided either directly by calling
-    /// this method, or through calling the api_secret builder methods.
+    /// this method, or through calling the api_key builder methods.
     pub fn remote(mut self, remote: impl Into<EndpointAddr>) -> Self {
         self.remote = Some(remote.into());
         self
@@ -514,9 +514,9 @@ mod tests {
 
     use crate::{
         Client,
-        api_secret::ApiSecret,
+        api_key::ApiKey,
         caps::{Cap, Caps},
-        client::API_SECRET_ENV_VAR_NAME,
+        client::API_KEY_ENV_VAR_NAME,
     };
 
     #[tokio::test]
@@ -526,9 +526,9 @@ mod tests {
         let mut rng = rand::rng();
         let shared_secret = SecretKey::generate(&mut rng);
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
-        let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+        let api_key = ApiKey::new(shared_secret.clone(), fake_endpoint_id);
         unsafe {
-            std::env::set_var(API_SECRET_ENV_VAR_NAME, api_secret.to_string());
+            std::env::set_var(API_KEY_ENV_VAR_NAME, api_key.to_string());
         };
 
         let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
@@ -536,7 +536,7 @@ mod tests {
             .await
             .unwrap();
 
-        let builder = Client::builder(&endpoint).api_secret_from_env().unwrap();
+        let builder = Client::builder(&endpoint).api_key_from_env().unwrap();
 
         let fake_endpoint_addr: EndpointAddr = fake_endpoint_id.into();
         assert_eq!(builder.remote, Some(fake_endpoint_addr));
@@ -556,7 +556,7 @@ mod tests {
         let mut rng = rand::rng();
         let shared_secret = SecretKey::generate(&mut rng);
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
-        let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+        let api_key = ApiKey::new(shared_secret.clone(), fake_endpoint_id);
 
         let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
             .bind()
@@ -565,7 +565,7 @@ mod tests {
 
         let client = Client::builder(&endpoint)
             .disable_metrics_interval()
-            .api_secret(api_secret)
+            .api_key(api_key)
             .unwrap()
             .build()
             .await

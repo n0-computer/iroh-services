@@ -13,14 +13,14 @@ use serde::{Deserialize, Serialize};
 /// The secret material used to connect your services.iroh.computer project. The
 /// value of these should be treated like any other API key: guard them carefully.
 #[derive(Debug, Clone)]
-pub struct ApiSecret {
+pub struct ApiKey {
     /// ED25519 secret used to construct rcans from
     pub secret: SecretKey,
     /// the services endpoint to direct requests to
     pub remote: EndpointAddr,
 }
 
-impl Display for ApiSecret {
+impl Display for ApiKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", Ticket::serialize(self))
     }
@@ -44,7 +44,7 @@ struct Variant0servicesTicket {
     addr: Variant0EndpointAddr,
 }
 
-impl Ticket for ApiSecret {
+impl Ticket for ApiKey {
     // KIND is the constant that's added to the front of a serialized ticket
     // string. It should be a short, human readable string
     const KIND: &'static str = "services";
@@ -73,7 +73,7 @@ impl Ticket for ApiSecret {
     }
 }
 
-impl FromStr for ApiSecret {
+impl FromStr for ApiKey {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -81,7 +81,7 @@ impl FromStr for ApiSecret {
     }
 }
 
-impl ApiSecret {
+impl ApiKey {
     /// Creates a new ticket.
     pub fn new(secret: SecretKey, remote: impl Into<EndpointAddr>) -> Self {
         Self {
