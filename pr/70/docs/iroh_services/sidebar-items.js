@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["API_KEY_ENV_VAR_NAME","CLIENT_HOST_ALPN","IROH_SERVICES_VERSION"],"mod":["api_key","caps","net_diagnostics","protocol"],"static":["IROH_VERSION"],"struct":["Client","ClientBuilder","ClientHost","Registry"],"type":["ClientHostClient"]};
