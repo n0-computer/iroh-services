@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"attr":["sim"],"mod":["caps","protocol","simulation"],"struct":["Client","ClientBuilder"],"trait":["N0de"]};

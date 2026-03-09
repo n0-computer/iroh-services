@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["TARGET","TARGET_END"],"enum":["VisNode"],"fn":["event","event_end","event_start"],"struct":["EventId"]};
