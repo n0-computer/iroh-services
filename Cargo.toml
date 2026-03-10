@@ -74,3 +74,10 @@ simulation = [
 [[example]]
 name = "net_diagnostics"
 required-features = ["net_diagnostics", "client_host"]
+
+[patch.crates-io]
+iroh = { git = "https://github.com/n0-computer/iroh.git", branch = "main" }
+iroh-metrics = { git = "https://github.com/n0-computer/iroh-metrics.git", branch = "iroh-X" }
+irpc = { git = "https://github.com/n0-computer/irpc.git", branch = "iroh-X" }
+irpc-iroh = { git = "https://github.com/n0-computer/irpc.git", branch = "iroh-X" }
+iroh-tickets = { git = "https://github.com/n0-computer/iroh-tickets.git", branch = "iroh-X" }
