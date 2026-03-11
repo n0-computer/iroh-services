@@ -63,7 +63,7 @@ pub struct ClientBuilder {
     cap_expiry: Duration,
     cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
-    label: Option<String>,
+    name: Option<String>,
     metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
@@ -81,7 +81,7 @@ impl ClientBuilder {
             cap: None,
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
-            label: None,
+            name: None,
             metrics_interval: Some(Duration::from_secs(60)),
             remote: None,
             registry,
@@ -110,13 +110,13 @@ impl ClientBuilder {
         self
     }
 
-    /// Set an optional human-readable label for this endpoint.
+    /// Set an optional human-readable name for this endpoint.
     ///
-    /// When set, this label is sent as part of authentication and associated
+    /// When set, this name is sent as part of authentication and associated
     /// with the endpoint on the server, making metrics from this endpoint
     /// easier to identify in monitoring dashboards.
-    pub fn label(mut self, label: impl Into<String>) -> Self {
-        self.label = Some(label.into());
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
         self
     }
 
@@ -207,7 +207,7 @@ impl ClientBuilder {
             ClientActor {
                 capabilities,
                 client,
-                label: self.label,
+                name: self.name,
                 session_id: Uuid::new_v4(),
                 authorized: false,
             }
@@ -374,7 +374,7 @@ enum ClientActorMessage {
 struct ClientActor {
     capabilities: Rcan<Caps>,
     client: IrohServicesClient,
-    label: Option<String>,
+    name: Option<String>,
     session_id: Uuid,
     authorized: bool,
 }
@@ -452,7 +452,7 @@ impl ClientActor {
         self.client
             .rpc(Auth {
                 caps: self.capabilities.clone(),
-                label: self.label.clone(),
+                name: self.name.clone(),
             })
             .await
             .inspect_err(|e| debug!("authorization failed: {:?}", e))
@@ -586,7 +586,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_label() {
+    async fn test_name() {
         let mut rng = rand::rng();
         let shared_secret = SecretKey::generate(&mut rng);
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
@@ -598,10 +598,10 @@ mod tests {
             .unwrap();
 
         let builder = Client::builder(&endpoint)
-            .label("my-node")
+            .name("my-node")
             .api_secret(api_secret)
             .unwrap();
 
-        assert_eq!(builder.label, Some("my-node".to_string()));
+        assert_eq!(builder.name, Some("my-node".to_string()));
     }
 }
