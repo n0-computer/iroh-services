@@ -62,6 +62,7 @@ pub struct ClientBuilder {
     cap_expiry: Duration,
     cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
+    name: Option<String>,
     metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
@@ -79,6 +80,7 @@ impl ClientBuilder {
             cap: None,
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
+            name: None,
             metrics_interval: Some(Duration::from_secs(60)),
             remote: None,
             registry,
@@ -104,6 +106,16 @@ impl ClientBuilder {
     /// Disable metrics collection.
     pub fn disable_metrics_interval(mut self) -> Self {
         self.metrics_interval = None;
+        self
+    }
+
+    /// Set an optional human-readable name for this endpoint.
+    ///
+    /// When set, this name is sent as part of authentication and associated
+    /// with the endpoint on the server, making metrics from this endpoint
+    /// easier to identify in monitoring dashboards.
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
         self
     }
 
@@ -194,6 +206,7 @@ impl ClientBuilder {
             ClientActor {
                 capabilities,
                 client,
+                name: self.name,
                 session_id: Uuid::new_v4(),
                 authorized: false,
             }
@@ -360,6 +373,7 @@ enum ClientActorMessage {
 struct ClientActor {
     capabilities: Rcan<Caps>,
     client: IrohServicesClient,
+    name: Option<String>,
     session_id: Uuid,
     authorized: bool,
 }
@@ -437,6 +451,7 @@ impl ClientActor {
         self.client
             .rpc(Auth {
                 caps: self.capabilities.clone(),
+                name: self.name.clone(),
             })
             .await
             .inspect_err(|e| debug!("authorization failed: {:?}", e))
@@ -573,5 +588,25 @@ mod tests {
 
         let err = client.push_metrics().await;
         assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_name() {
+        let mut rng = rand::rng();
+        let shared_secret = SecretKey::generate(&mut rng);
+        let fake_endpoint_id = SecretKey::generate(&mut rng).public();
+        let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+
+        let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
+            .bind()
+            .await
+            .unwrap();
+
+        let builder = Client::builder(&endpoint)
+            .name("my-node")
+            .api_secret(api_secret)
+            .unwrap();
+
+        assert_eq!(builder.name, Some("my-node".to_string()));
     }
 }
