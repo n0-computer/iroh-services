@@ -62,6 +62,14 @@ pub struct Auth {
     pub label: Option<String>,
 }
 
+impl Default for Auth {
+    fn default() -> Self {
+        Self {
+            caps: Default::default(),
+            label: None,
+        }
+    }
+}
 /// Request to store the given metrics data
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PutMetrics {
