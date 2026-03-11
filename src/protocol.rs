@@ -53,6 +53,7 @@ pub enum RemoteError {
 }
 
 /// Authentication on first request
+#[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Auth {
     pub caps: Rcan<Caps>,
@@ -113,8 +114,9 @@ mod tests {
         let mut rng = rand::rng();
         let secret = SecretKey::generate(&mut rng);
         let id = SecretKey::generate(&mut rng).public();
-        let caps = create_api_token_from_secret_key(secret, id, Duration::from_secs(60), Caps::default())
-            .unwrap();
+        let caps =
+            create_api_token_from_secret_key(secret, id, Duration::from_secs(60), Caps::default())
+                .unwrap();
         Auth {
             caps,
             label: label.map(Into::into),
