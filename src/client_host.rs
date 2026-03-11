@@ -194,7 +194,7 @@ mod tests {
         let client = ClientHostClient::boxed(conn);
 
         // authenticate with the server-issued grant
-        client.rpc(Auth { caps: rcan }).await.unwrap();
+        client.rpc(Auth { caps: rcan, label: None }).await.unwrap();
 
         // send RunNetworkDiagnostics and verify we get a report back
         let result = client.rpc(RunNetworkDiagnostics).await.unwrap();
@@ -239,7 +239,7 @@ mod tests {
         let client = IrohServicesClient::boxed(conn);
 
         // auth should fail because the RCAN issuer is the client, not the server
-        let result = client.rpc(Auth { caps: rcan }).await;
+        let result = client.rpc(Auth { caps: rcan, label: None }).await;
         assert!(
             result.is_err(),
             "expected auth to be rejected for self-signed RCAN"
