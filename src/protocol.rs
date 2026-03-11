@@ -114,9 +114,8 @@ mod tests {
     use n0_future::time::Duration;
     use serde::{Deserialize, Serialize};
 
-    use crate::caps::{Caps, create_api_token_from_secret_key};
-
     use super::Auth;
+    use crate::caps::{Caps, create_api_token_from_secret_key};
 
     fn make_auth(label: Option<&str>) -> Auth {
         let mut rng = rand::rng();
