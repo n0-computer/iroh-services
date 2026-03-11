@@ -150,8 +150,9 @@
 <a href=#150 id=150 data-nosnippet>150</a>        </span><span class="kw">let </span>auth = make_auth(<span class="prelude-val">None</span>);
 <a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">let </span>bytes = postcard::to_stdvec(<span class="kw-2">&amp;</span>auth).unwrap();
 <a href=#152 id=152 data-nosnippet>152</a>
-<a href=#153 id=153 data-nosnippet>153</a>        <span class="comment">// Old server struct ignores the trailing Option byte.
-<a href=#154 id=154 data-nosnippet>154</a>        </span><span class="kw">let </span>_legacy: LegacyAuth = postcard::from_bytes(<span class="kw-2">&amp;</span>bytes).unwrap();
-<a href=#155 id=155 data-nosnippet>155</a>    }
-<a href=#156 id=156 data-nosnippet>156</a>}
+<a href=#153 id=153 data-nosnippet>153</a>        <span class="comment">// Old server decodes the prefix it understands and ignores any trailing bytes
+<a href=#154 id=154 data-nosnippet>154</a>        // (such as those that might be introduced by the optional `label` field).
+<a href=#155 id=155 data-nosnippet>155</a>        </span><span class="kw">let </span>(_legacy, _remaining) = postcard::take_from_bytes::&lt;LegacyAuth&gt;(<span class="kw-2">&amp;</span>bytes).unwrap();
+<a href=#156 id=156 data-nosnippet>156</a>    }
+<a href=#157 id=157 data-nosnippet>157</a>}
 </code></pre></div></section></main></body></html>
