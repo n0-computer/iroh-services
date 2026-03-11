@@ -58,10 +58,18 @@ pub enum RemoteError {
 pub struct Auth {
     pub caps: Rcan<Caps>,
     /// Optional human-readable label for this endpoint
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
 
+impl Default for Auth {
+    fn default() -> Self {
+        Self {
+            caps: Default::default(),
+            label: None,
+        }
+    }
+}
 /// Request to store the given metrics data
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PutMetrics {
@@ -144,7 +152,8 @@ mod tests {
         let auth = make_auth(None);
         let bytes = postcard::to_stdvec(&auth).unwrap();
 
-        // Old server struct ignores the trailing Option byte.
-        let _legacy: LegacyAuth = postcard::from_bytes(&bytes).unwrap();
+        // Old server decodes the prefix it understands and ignores any trailing bytes
+        // (such as those that might be introduced by the optional `label` field).
+        let (_legacy, _remaining) = postcard::take_from_bytes::<LegacyAuth>(&bytes).unwrap();
     }
 }
