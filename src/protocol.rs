@@ -57,9 +57,9 @@ pub enum RemoteError {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Auth {
     pub caps: Rcan<Caps>,
-    /// Optional human-readable label for this endpoint
+    /// Optional human-readable name for this endpoint
     #[serde(default)]
-    pub label: Option<String>,
+    pub name: Option<String>,
 }
 
 /// Request to store the given metrics data
@@ -109,7 +109,7 @@ mod tests {
     use super::Auth;
     use crate::caps::{Caps, create_api_token_from_secret_key};
 
-    fn make_auth(label: Option<&str>) -> Auth {
+    fn make_auth(name: Option<&str>) -> Auth {
         let mut rng = rand::rng();
         let secret = SecretKey::generate(&mut rng);
         let id = SecretKey::generate(&mut rng).public();
@@ -118,33 +118,33 @@ mod tests {
                 .unwrap();
         Auth {
             caps,
-            label: label.map(Into::into),
+            name: name.map(Into::into),
         }
     }
 
-    /// Simulates an old server/client that has no label field.
+    /// Simulates an old server/client that has no name field.
     #[derive(Serialize, Deserialize)]
     struct LegacyAuth {
         caps: rcan::Rcan<Caps>,
     }
 
     #[test]
-    fn auth_label_round_trip() {
+    fn auth_name_round_trip() {
         let auth = make_auth(Some("my-node"));
         let bytes = postcard::to_stdvec(&auth).unwrap();
         let decoded: Auth = postcard::from_bytes(&bytes).unwrap();
-        assert_eq!(decoded.label, Some("my-node".to_string()));
+        assert_eq!(decoded.name, Some("my-node".to_string()));
     }
 
     #[test]
-    fn auth_label_new_client_old_server_compat() {
-        // A new client sending Auth with label=None should produce bytes that an
+    fn auth_name_new_client_old_server_compat() {
+        // A new client sending Auth with name=None should produce bytes that an
         // old server (represented here by LegacyAuth) can still decode successfully.
         let auth = make_auth(None);
         let bytes = postcard::to_stdvec(&auth).unwrap();
 
         // Old server decodes the prefix it understands and ignores any trailing bytes
-        // (such as those that might be introduced by the optional `label` field).
+        // (such as those that might be introduced by the optional `name` field).
         let (_legacy, _remaining) = postcard::take_from_bytes::<LegacyAuth>(&bytes).unwrap();
     }
 }

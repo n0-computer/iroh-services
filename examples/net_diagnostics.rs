@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     // 3. Build a Client that dials iroh-services (as in all other examples).
     let client = Client::builder(&endpoint)
         .api_secret(secret.clone())?
-        .label("net-diagnostics-client")
+        .name("net-diagnostics-client")
         .build()
         .await?;
 
