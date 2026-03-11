@@ -197,7 +197,7 @@ mod tests {
         client
             .rpc(Auth {
                 caps: rcan,
-                label: None,
+                name: None,
             })
             .await
             .unwrap();
@@ -248,7 +248,7 @@ mod tests {
         let result = client
             .rpc(Auth {
                 caps: rcan,
-                label: None,
+                name: None,
             })
             .await;
         assert!(
