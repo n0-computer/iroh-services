@@ -112,8 +112,9 @@ impl ClientBuilder {
 
     /// Set an optional human-readable label for this endpoint.
     ///
-    /// When set, this label is included with all metrics pushes, making it
-    /// easier to identify the endpoint in monitoring dashboards.
+    /// When set, this label is sent as part of authentication and associated
+    /// with the endpoint on the server, making metrics from this endpoint
+    /// easier to identify in monitoring dashboards.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
