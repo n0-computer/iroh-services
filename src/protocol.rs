@@ -58,7 +58,7 @@ pub enum RemoteError {
 pub struct Auth {
     pub caps: Rcan<Caps>,
     /// Optional human-readable label for this endpoint
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
 
