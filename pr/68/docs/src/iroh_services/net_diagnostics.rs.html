@@ -124,12 +124,9 @@
 <a href=#124 id=124 data-nosnippet>124</a>
 <a href=#125 id=125 data-nosnippet>125</a>    <span class="attr">#[tokio::test]
 <a href=#126 id=126 data-nosnippet>126</a>    </span><span class="kw">async fn </span>test_run_diagnostics() {
-<a href=#127 id=127 data-nosnippet>127</a>        <span class="kw">let </span>endpoint = iroh::Endpoint::empty_builder(iroh::RelayMode::Disabled)
-<a href=#128 id=128 data-nosnippet>128</a>            .bind()
-<a href=#129 id=129 data-nosnippet>129</a>            .<span class="kw">await
-<a href=#130 id=130 data-nosnippet>130</a>            </span>.unwrap();
-<a href=#131 id=131 data-nosnippet>131</a>        run_diagnostics(<span class="kw-2">&amp;</span>endpoint).<span class="kw">await</span>.unwrap();
-<a href=#132 id=132 data-nosnippet>132</a>        endpoint.close().<span class="kw">await</span>;
-<a href=#133 id=133 data-nosnippet>133</a>    }
-<a href=#134 id=134 data-nosnippet>134</a>}
+<a href=#127 id=127 data-nosnippet>127</a>        <span class="kw">let </span>endpoint = iroh::Endpoint::empty_builder().bind().<span class="kw">await</span>.unwrap();
+<a href=#128 id=128 data-nosnippet>128</a>        run_diagnostics(<span class="kw-2">&amp;</span>endpoint).<span class="kw">await</span>.unwrap();
+<a href=#129 id=129 data-nosnippet>129</a>        endpoint.close().<span class="kw">await</span>;
+<a href=#130 id=130 data-nosnippet>130</a>    }
+<a href=#131 id=131 data-nosnippet>131</a>}
 </code></pre></div></section></main></body></html>

@@ -145,7 +145,7 @@
 <a href=#145 id=145 data-nosnippet>145</a><span class="attr">#[cfg(test)]
 <a href=#146 id=146 data-nosnippet>146</a>#[cfg(feature = <span class="string">"net_diagnostics"</span>)]
 <a href=#147 id=147 data-nosnippet>147</a></span><span class="kw">mod </span>tests {
-<a href=#148 id=148 data-nosnippet>148</a>    <span class="kw">use </span>iroh::{RelayMode, address_lookup::MemoryLookup, protocol::Router};
+<a href=#148 id=148 data-nosnippet>148</a>    <span class="kw">use </span>iroh::{address_lookup::MemoryLookup, protocol::Router};
 <a href=#149 id=149 data-nosnippet>149</a>    <span class="kw">use </span>irpc_iroh::IrohLazyRemoteConnection;
 <a href=#150 id=150 data-nosnippet>150</a>    <span class="kw">use </span>n0_future::time::Duration;
 <a href=#151 id=151 data-nosnippet>151</a>
@@ -159,13 +159,13 @@
 <a href=#159 id=159 data-nosnippet>159</a>    <span class="attr">#[tokio::test]
 <a href=#160 id=160 data-nosnippet>160</a>    </span><span class="kw">async fn </span>test_diagnostics_host_run_diagnostics() {
 <a href=#161 id=161 data-nosnippet>161</a>        <span class="kw">let </span>lookup = MemoryLookup::new();
-<a href=#162 id=162 data-nosnippet>162</a>        <span class="kw">let </span>server_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+<a href=#162 id=162 data-nosnippet>162</a>        <span class="kw">let </span>server_ep = iroh::Endpoint::empty_builder()
 <a href=#163 id=163 data-nosnippet>163</a>            .address_lookup(lookup.clone())
 <a href=#164 id=164 data-nosnippet>164</a>            .bind()
 <a href=#165 id=165 data-nosnippet>165</a>            .<span class="kw">await
 <a href=#166 id=166 data-nosnippet>166</a>            </span>.unwrap();
 <a href=#167 id=167 data-nosnippet>167</a>
-<a href=#168 id=168 data-nosnippet>168</a>        <span class="kw">let </span>client_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+<a href=#168 id=168 data-nosnippet>168</a>        <span class="kw">let </span>client_ep = iroh::Endpoint::empty_builder()
 <a href=#169 id=169 data-nosnippet>169</a>            .address_lookup(lookup.clone())
 <a href=#170 id=170 data-nosnippet>170</a>            .bind()
 <a href=#171 id=171 data-nosnippet>171</a>            .<span class="kw">await
@@ -208,13 +208,13 @@
 <a href=#208 id=208 data-nosnippet>208</a>    <span class="attr">#[tokio::test]
 <a href=#209 id=209 data-nosnippet>209</a>    </span><span class="kw">async fn </span>test_client_host_rejects_self_signed_rcan() {
 <a href=#210 id=210 data-nosnippet>210</a>        <span class="kw">let </span>lookup = MemoryLookup::new();
-<a href=#211 id=211 data-nosnippet>211</a>        <span class="kw">let </span>server_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+<a href=#211 id=211 data-nosnippet>211</a>        <span class="kw">let </span>server_ep = iroh::Endpoint::empty_builder()
 <a href=#212 id=212 data-nosnippet>212</a>            .address_lookup(lookup.clone())
 <a href=#213 id=213 data-nosnippet>213</a>            .bind()
 <a href=#214 id=214 data-nosnippet>214</a>            .<span class="kw">await
 <a href=#215 id=215 data-nosnippet>215</a>            </span>.unwrap();
 <a href=#216 id=216 data-nosnippet>216</a>
-<a href=#217 id=217 data-nosnippet>217</a>        <span class="kw">let </span>client_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+<a href=#217 id=217 data-nosnippet>217</a>        <span class="kw">let </span>client_ep = iroh::Endpoint::empty_builder()
 <a href=#218 id=218 data-nosnippet>218</a>            .address_lookup(lookup.clone())
 <a href=#219 id=219 data-nosnippet>219</a>            .bind()
 <a href=#220 id=220 data-nosnippet>220</a>            .<span class="kw">await
