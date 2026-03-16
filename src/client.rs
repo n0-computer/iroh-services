@@ -29,10 +29,11 @@ use crate::{
 /// Client requires either an Ssh Key or [`ApiSecret`]
 ///
 /// ```no_run
+/// use iroh::{Endpoint, endpoint::presets};
 /// use iroh_services::Client;
 ///
 /// async fn build_client() -> anyhow::Result<()> {
-///     let endpoint = iroh::Endpoint::bind().await?;
+///     let endpoint = Endpoint::bind(presets::N0).await?;
 ///
 ///     // needs IROH_SERVICES_API_SECRET set to an environment variable
 ///     // client will now push endpoint metrics to iroh-services.
@@ -531,10 +532,7 @@ mod tests {
             std::env::set_var(API_SECRET_ENV_VAR_NAME, api_secret.to_string());
         };
 
-        let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
-            .bind()
-            .await
-            .unwrap();
+        let endpoint = Endpoint::empty_builder().bind().await.unwrap();
 
         let builder = Client::builder(&endpoint).api_secret_from_env().unwrap();
 
@@ -558,10 +556,7 @@ mod tests {
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
         let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
 
-        let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
-            .bind()
-            .await
-            .unwrap();
+        let endpoint = Endpoint::empty_builder().bind().await.unwrap();
 
         let client = Client::builder(&endpoint)
             .disable_metrics_interval()

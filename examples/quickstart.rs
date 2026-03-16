@@ -1,9 +1,9 @@
-use iroh::Endpoint;
+use iroh::{Endpoint, endpoint::presets};
 use iroh_services::Client;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let endpoint = Endpoint::bind().await?;
+    let endpoint = Endpoint::bind(presets::N0).await?;
 
     // needs IROH_SERVICES_API_SECRET set to an environment variable
     // client will now push endpoint metrics to iroh-services

@@ -124,10 +124,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_diagnostics() {
-        let endpoint = iroh::Endpoint::empty_builder(iroh::RelayMode::Disabled)
-            .bind()
-            .await
-            .unwrap();
+        let endpoint = iroh::Endpoint::empty_builder().bind().await.unwrap();
         run_diagnostics(&endpoint).await.unwrap();
         endpoint.close().await;
     }

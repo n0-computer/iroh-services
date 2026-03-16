@@ -145,7 +145,7 @@ async fn send_missing_caps<T>(
 #[cfg(test)]
 #[cfg(feature = "net_diagnostics")]
 mod tests {
-    use iroh::{RelayMode, address_lookup::MemoryLookup, protocol::Router};
+    use iroh::{address_lookup::MemoryLookup, protocol::Router};
     use irpc_iroh::IrohLazyRemoteConnection;
     use n0_future::time::Duration;
 
@@ -159,13 +159,13 @@ mod tests {
     #[tokio::test]
     async fn test_diagnostics_host_run_diagnostics() {
         let lookup = MemoryLookup::new();
-        let server_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+        let server_ep = iroh::Endpoint::empty_builder()
             .address_lookup(lookup.clone())
             .bind()
             .await
             .unwrap();
 
-        let client_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+        let client_ep = iroh::Endpoint::empty_builder()
             .address_lookup(lookup.clone())
             .bind()
             .await
@@ -208,13 +208,13 @@ mod tests {
     #[tokio::test]
     async fn test_client_host_rejects_self_signed_rcan() {
         let lookup = MemoryLookup::new();
-        let server_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+        let server_ep = iroh::Endpoint::empty_builder()
             .address_lookup(lookup.clone())
             .bind()
             .await
             .unwrap();
 
-        let client_ep = iroh::Endpoint::empty_builder(RelayMode::Disabled)
+        let client_ep = iroh::Endpoint::empty_builder()
             .address_lookup(lookup.clone())
             .bind()
             .await
