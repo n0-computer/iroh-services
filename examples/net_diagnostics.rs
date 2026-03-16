@@ -10,7 +10,7 @@
 //!
 //! Run with: cargo run --features=net_diagnostics,client_host --example net_diagnostics
 use anyhow::Result;
-use iroh::{Endpoint, protocol::Router};
+use iroh::{Endpoint, endpoint::presets, protocol::Router};
 use iroh_services::{
     API_SECRET_ENV_VAR_NAME, ApiSecret, CLIENT_HOST_ALPN, Client, ClientHost,
     caps::NetDiagnosticsCap,
@@ -20,7 +20,7 @@ use iroh_services::{
 async fn main() -> Result<()> {
     // 1. Create an endpoint that will both dial iroh-services and accept incoming
     //    requests from the iroh-services service via a ClientHost.
-    let endpoint = Endpoint::builder().bind().await?;
+    let endpoint = Endpoint::bind(presets::N0).await?;
 
     // 2. Parse the ApiSecret separately so we can extract the remote
     //    EndpointID. Normally we'd pass it straight to the client builder.

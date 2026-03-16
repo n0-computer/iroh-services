@@ -39,3 +39,4 @@ hash = 3171872035
 path = "LICENSE"
 
 [sources]
+allow-git = []
