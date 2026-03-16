@@ -592,10 +592,7 @@ mod tests {
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
         let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
 
-        let endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
-            .bind()
-            .await
-            .unwrap();
+        let endpoint = Endpoint::empty_builder().bind().await.unwrap();
 
         let builder = Client::builder(&endpoint)
             .name("my-node")
