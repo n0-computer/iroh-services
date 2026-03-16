@@ -592,17 +592,14 @@
 <a href=#592 id=592 data-nosnippet>592</a>        <span class="kw">let </span>fake_endpoint_id = SecretKey::generate(<span class="kw-2">&amp;mut </span>rng).public();
 <a href=#593 id=593 data-nosnippet>593</a>        <span class="kw">let </span>api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
 <a href=#594 id=594 data-nosnippet>594</a>
-<a href=#595 id=595 data-nosnippet>595</a>        <span class="kw">let </span>endpoint = Endpoint::empty_builder(iroh::RelayMode::Disabled)
-<a href=#596 id=596 data-nosnippet>596</a>            .bind()
-<a href=#597 id=597 data-nosnippet>597</a>            .<span class="kw">await
-<a href=#598 id=598 data-nosnippet>598</a>            </span>.unwrap();
-<a href=#599 id=599 data-nosnippet>599</a>
-<a href=#600 id=600 data-nosnippet>600</a>        <span class="kw">let </span>builder = Client::builder(<span class="kw-2">&amp;</span>endpoint)
-<a href=#601 id=601 data-nosnippet>601</a>            .name(<span class="string">"my-node"</span>)
-<a href=#602 id=602 data-nosnippet>602</a>            .api_secret(api_secret)
-<a href=#603 id=603 data-nosnippet>603</a>            .unwrap();
-<a href=#604 id=604 data-nosnippet>604</a>
-<a href=#605 id=605 data-nosnippet>605</a>        <span class="macro">assert_eq!</span>(builder.name, <span class="prelude-val">Some</span>(<span class="string">"my-node"</span>.to_string()));
-<a href=#606 id=606 data-nosnippet>606</a>    }
-<a href=#607 id=607 data-nosnippet>607</a>}
+<a href=#595 id=595 data-nosnippet>595</a>        <span class="kw">let </span>endpoint = Endpoint::empty_builder().bind().<span class="kw">await</span>.unwrap();
+<a href=#596 id=596 data-nosnippet>596</a>
+<a href=#597 id=597 data-nosnippet>597</a>        <span class="kw">let </span>builder = Client::builder(<span class="kw-2">&amp;</span>endpoint)
+<a href=#598 id=598 data-nosnippet>598</a>            .name(<span class="string">"my-node"</span>)
+<a href=#599 id=599 data-nosnippet>599</a>            .api_secret(api_secret)
+<a href=#600 id=600 data-nosnippet>600</a>            .unwrap();
+<a href=#601 id=601 data-nosnippet>601</a>
+<a href=#602 id=602 data-nosnippet>602</a>        <span class="macro">assert_eq!</span>(builder.name, <span class="prelude-val">Some</span>(<span class="string">"my-node"</span>.to_string()));
+<a href=#603 id=603 data-nosnippet>603</a>    }
+<a href=#604 id=604 data-nosnippet>604</a>}
 </code></pre></div></section></main></body></html>
