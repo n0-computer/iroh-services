@@ -143,8 +143,8 @@ mod tests {
         let auth = make_auth(None);
         let bytes = postcard::to_stdvec(&auth).unwrap();
 
-        // Old server decodes the prefix it understands and ignores any trailing bytes
-        // (such as those that might be introduced by the optional `name` field).
-        let (_legacy, _remaining) = postcard::take_from_bytes::<LegacyAuth>(&bytes).unwrap();
+        // Old server decodes, should still work
+        let legacy = postcard::from_bytes::<LegacyAuth>(&bytes).unwrap();
+        assert_eq!(auth.caps, legacy.caps);
     }
 }
