@@ -19,9 +19,12 @@ use crate::net_diagnostics::{DiagnosticsReport, checks::run_diagnostics};
 #[cfg(feature = "net_diagnostics")]
 use crate::protocol::PutNetworkDiagnostics;
 use crate::{
+    alerts::LogMonitor,
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{ALPN, Auth, IrohServicesClient, Ping, Pong, PutMetrics, RemoteError},
+    protocol::{
+        ALPN, AlertInfo, Auth, IrohServicesClient, Ping, Pong, PutMetrics, RemoteError, SendAlert,
+    },
 };
 
 /// Client is the main handle for interacting with iroh-services. It communicates with
@@ -284,6 +287,36 @@ impl Client {
             .map_err(Error::Remote)
     }
 
+    /// Enable alert forwarding. Returns a [`LogMonitor`] tracing layer that
+    /// captures ERROR-level log events from the `iroh` crate and forwards
+    /// them to n0des. The caller must install the returned layer into their
+    /// tracing subscriber stack.
+    ///
+    /// ```no_run
+    /// use tracing_subscriber::prelude::*;
+    ///
+    /// # async fn example(client: &iroh_n0des::Client) -> anyhow::Result<()> {
+    /// let alert_layer = client.enable_alerts().await?;
+    /// tracing_subscriber::registry()
+    ///     .with(alert_layer)
+    ///     .with(tracing_subscriber::fmt::layer())
+    ///     .init();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn enable_alerts(&self) -> Result<LogMonitor, Error> {
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        let (done_tx, done_rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::EnableAlerts { rx, done: done_tx })
+            .await
+            .map_err(|_| Error::Other(anyhow!("enabling alerts")))?;
+        done_rx
+            .await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?;
+        Ok(LogMonitor::new(tx))
+    }
+
     /// Grant capabilities to a remote endpoint. Creates a signed RCAN token
     /// and sends it to iroh-services for storage. The remote can then use this token
     /// when dialing back to authorize its requests.
@@ -344,6 +377,10 @@ enum ClientActorMessage {
     Ping {
         done: oneshot::Sender<Result<Pong, RemoteError>>,
     },
+    EnableAlerts {
+        rx: tokio::sync::mpsc::Receiver<AlertInfo>,
+        done: oneshot::Sender<()>,
+    },
     // GrantCap is used by the `client_host` feature flag
     #[allow(dead_code)]
     GrantCap {
@@ -375,6 +412,7 @@ impl ClientActor {
         let registry = Arc::new(RwLock::new(registry));
         let mut encoder = Encoder::new(registry);
         let mut metrics_timer = interval.map(|interval| n0_future::time::interval(interval));
+        let mut alert_rx: Option<tokio::sync::mpsc::Receiver<AlertInfo>> = None;
         trace!("starting client actor");
         loop {
             trace!("client actor tick");
@@ -389,6 +427,10 @@ impl ClientActor {
                                 self.authorized = false;
                             }
                         },
+                        ClientActorMessage::EnableAlerts{ rx, done } => {
+                            alert_rx = Some(rx);
+                            let _ = done.send(());
+                        }
                         ClientActorMessage::SendMetrics{ done } => {
                             trace!("sending metrics manually triggered");
                             let res = self.send_metrics(&mut encoder).await;
@@ -422,6 +464,18 @@ impl ClientActor {
                     trace!("metrics send tick");
                     if let Err(err) = self.send_metrics(&mut encoder).await {
                         debug!("failed to push metrics: {:#?}", err);
+                        self.authorized = false;
+                    }
+                },
+                Some(alert) = async {
+                    if let Some(ref mut rx) = alert_rx {
+                        rx.recv().await
+                    } else {
+                        std::future::pending::<Option<AlertInfo>>().await
+                    }
+                } => {
+                    if let Err(err) = self.send_alert(alert).await {
+                        debug!("failed to send alert: {:#?}", err);
                         self.authorized = false;
                     }
                 },
@@ -467,6 +521,23 @@ impl ClientActor {
         let req = PutMetrics {
             session_id: self.session_id,
             update,
+        };
+
+        self.client
+            .rpc(req)
+            .await
+            .map_err(|_| RemoteError::InternalServerError)??;
+
+        Ok(())
+    }
+
+    async fn send_alert(&mut self, alert: AlertInfo) -> Result<(), RemoteError> {
+        trace!("client actor send alert");
+        self.auth().await?;
+
+        let req = SendAlert {
+            session_id: self.session_id,
+            alert,
         };
 
         self.client
