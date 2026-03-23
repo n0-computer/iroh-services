@@ -474,10 +474,7 @@ impl ClientActor {
         }
         trace!("client authorizing");
         self.client
-            .rpc(Auth {
-                caps: self.capabilities.clone(),
-                label: self.label.clone(),
-            })
+            .rpc(Auth::new(self.capabilities.clone(), self.label.clone()))
             .await
             .inspect_err(|e| debug!("authorization failed: {:?}", e))
             .map_err(|e| RemoteError::AuthError(e.to_string()))?;

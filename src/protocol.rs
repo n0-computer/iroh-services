@@ -62,6 +62,12 @@ pub struct Auth {
     pub label: Option<String>,
 }
 
+impl Auth {
+    pub fn new(caps: Rcan<Caps>, label: Option<String>) -> Self {
+        Auth { caps, label }
+    }
+}
+
 /// Request to store the given metrics data
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PutMetrics {
