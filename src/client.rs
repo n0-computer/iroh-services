@@ -117,8 +117,8 @@ impl ClientBuilder {
     /// with the endpoint servers-side, making metrics from this endpoint
     /// easier to identify in monitoring dashboards.
     ///
-    /// labels can be any UTF-8 string, with a maximum length of 1024 bytes,
-    /// label uniqueness is *not* enforced.
+    /// labels can be any UTF-8 string, with a min length of 2 bytes, and
+    /// maximum length of 128 bytes. label uniqueness is **not** enforced.
     pub fn label(mut self, label: impl Into<String>) -> Result<Self> {
         let label = label.into();
         if label.len() < LABEL_MIN_LENGTH {
