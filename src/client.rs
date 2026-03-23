@@ -121,11 +121,10 @@ impl ClientBuilder {
     /// label uniqueness is *not* enforced.
     pub fn label(mut self, label: impl Into<String>) -> Result<Self> {
         let label = label.into();
-        if label.len() > 1024 {
-            return Err(BuildError::InvalidLabel(anyhow!(
-                "label too long, exceeds max length of 1024 bytes"
-            ))
-            .into());
+        if label.len() < LABEL_MIN_LENGTH {
+            return Err(BuildError::InvalidLabel(ValidateLabelError::TooShort).into());
+        } else if label.len() > LABEL_MAX_LENGTH {
+            return Err(BuildError::InvalidLabel(ValidateLabelError::TooLong).into());
         }
 
         self.label = Some(label);
@@ -219,7 +218,7 @@ impl ClientBuilder {
             ClientActor {
                 capabilities,
                 client,
-                name: self.label,
+                label: self.label,
                 session_id: Uuid::new_v4(),
                 authorized: false,
             }
@@ -249,7 +248,7 @@ pub enum BuildError {
     #[error("Connection error: {0}")]
     Connect(ConnectError),
     #[error("Invalid endpoint label: {0}")]
-    InvalidLabel(#[from] anyhow::Error),
+    InvalidLabel(#[from] ValidateLabelError),
 }
 
 impl From<irpc::Error> for BuildError {
@@ -266,6 +265,17 @@ impl From<irpc::Error> for BuildError {
             value => Self::Rpc(value),
         }
     }
+}
+
+pub const LABEL_MIN_LENGTH: usize = 2;
+pub const LABEL_MAX_LENGTH: usize = 128;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ValidateLabelError {
+    #[error("Label is too long (must be no more than {LABEL_MAX_LENGTH} characters).")]
+    TooLong,
+    #[error("LAbel is too short (must be at least {LABEL_MIN_LENGTH} characters).")]
+    TooShort,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -388,7 +398,7 @@ enum ClientActorMessage {
 struct ClientActor {
     capabilities: Rcan<Caps>,
     client: IrohServicesClient,
-    name: Option<String>,
+    label: Option<String>,
     session_id: Uuid,
     authorized: bool,
 }
@@ -466,7 +476,7 @@ impl ClientActor {
         self.client
             .rpc(Auth {
                 caps: self.capabilities.clone(),
-                name: self.name.clone(),
+                label: self.label.clone(),
             })
             .await
             .inspect_err(|e| debug!("authorization failed: {:?}", e))
@@ -546,7 +556,7 @@ mod tests {
         Client,
         api_secret::ApiSecret,
         caps::{Cap, Caps},
-        client::{API_SECRET_ENV_VAR_NAME, BuildError},
+        client::{API_SECRET_ENV_VAR_NAME, BuildError, ValidateLabelError},
     };
 
     #[tokio::test]
@@ -616,13 +626,21 @@ mod tests {
 
         assert_eq!(builder.label, Some("my-node 👋".to_string()));
 
-        let too_long_name = "👋".repeat(1025);
+        let Err(err) = Client::builder(&endpoint).label("a") else {
+            panic!("label should fail for strings under 2 bytes");
+        };
+        assert!(matches!(
+            err.downcast_ref::<BuildError>(),
+            Some(BuildError::InvalidLabel(ValidateLabelError::TooShort))
+        ));
+
+        let too_long_name = "👋".repeat(129);
         let Err(err) = Client::builder(&endpoint).label(&too_long_name) else {
             panic!("label should fail for strings over 1024 bytes");
         };
         assert!(matches!(
             err.downcast_ref::<BuildError>(),
-            Some(BuildError::InvalidLabel(_))
+            Some(BuildError::InvalidLabel(ValidateLabelError::TooLong))
         ));
     }
 }

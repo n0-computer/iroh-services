@@ -57,9 +57,9 @@ pub enum RemoteError {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Auth {
     pub caps: Rcan<Caps>,
-    /// Optional human-readable name for this endpoint
+    /// Optional human-readable label for this endpoint
     #[serde(default)]
-    pub name: Option<String>,
+    pub label: Option<String>,
 }
 
 /// Request to store the given metrics data
@@ -118,7 +118,7 @@ mod tests {
                 .unwrap();
         Auth {
             caps,
-            name: name.map(Into::into),
+            label: name.map(Into::into),
         }
     }
 
@@ -133,7 +133,7 @@ mod tests {
         let auth = make_auth(Some("my-node"));
         let bytes = postcard::to_stdvec(&auth).unwrap();
         let decoded: Auth = postcard::from_bytes(&bytes).unwrap();
-        assert_eq!(decoded.name, Some("my-node".to_string()));
+        assert_eq!(decoded.label, Some("my-node".to_string()));
     }
 
     #[test]
