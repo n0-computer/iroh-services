@@ -117,8 +117,8 @@
 <a href=#117 id=117 data-nosnippet>117</a>    /// with the endpoint servers-side, making metrics from this endpoint
 <a href=#118 id=118 data-nosnippet>118</a>    /// easier to identify in monitoring dashboards.
 <a href=#119 id=119 data-nosnippet>119</a>    ///
-<a href=#120 id=120 data-nosnippet>120</a>    /// labels can be any UTF-8 string, with a maximum length of 1024 bytes,
-<a href=#121 id=121 data-nosnippet>121</a>    /// label uniqueness is *not* enforced.
+<a href=#120 id=120 data-nosnippet>120</a>    /// labels can be any UTF-8 string, with a min length of 2 bytes, and
+<a href=#121 id=121 data-nosnippet>121</a>    /// maximum length of 128 bytes. label uniqueness is **not** enforced.
 <a href=#122 id=122 data-nosnippet>122</a>    </span><span class="kw">pub fn </span>label(<span class="kw-2">mut </span><span class="self">self</span>, label: <span class="kw">impl </span>Into&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
 <a href=#123 id=123 data-nosnippet>123</a>        <span class="kw">let </span>label = label.into();
 <a href=#124 id=124 data-nosnippet>124</a>        <span class="kw">if </span>label.len() &lt; LABEL_MIN_LENGTH {
