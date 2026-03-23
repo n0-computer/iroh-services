@@ -63,7 +63,7 @@ pub struct ClientBuilder {
     cap_expiry: Duration,
     cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
-    name: Option<String>,
+    label: Option<String>,
     metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
@@ -81,7 +81,7 @@ impl ClientBuilder {
             cap: None,
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
-            name: None,
+            label: None,
             metrics_interval: Some(Duration::from_secs(60)),
             remote: None,
             registry,
@@ -110,14 +110,26 @@ impl ClientBuilder {
         self
     }
 
-    /// Set an optional human-readable name for this endpoint.
+    /// Set an optional human-readable name for this endpoint, often used for
+    /// associating with other services in your app, like a database user id.
     ///
     /// When set, this name is sent as part of authentication and associated
-    /// with the endpoint on the server, making metrics from this endpoint
+    /// with the endpoint servers-side, making metrics from this endpoint
     /// easier to identify in monitoring dashboards.
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
+    ///
+    /// labels can be any UTF-8 string, with a maximum length of 1024 bytes,
+    /// label uniqueness is *not* enforced.
+    pub fn label(mut self, label: impl Into<String>) -> Result<Self> {
+        let label = label.into();
+        if label.len() > 1024 {
+            return Err(BuildError::InvalidLabel(anyhow!(
+                "label too long, exceeds max length of 1024 bytes"
+            ))
+            .into());
+        }
+
+        self.label = Some(label);
+        Ok(self)
     }
 
     /// Check IROH_SERVICES_API_SECRET environment variable for a valid API secret
@@ -207,7 +219,7 @@ impl ClientBuilder {
             ClientActor {
                 capabilities,
                 client,
-                name: self.name,
+                name: self.label,
                 session_id: Uuid::new_v4(),
                 authorized: false,
             }
@@ -236,6 +248,8 @@ pub enum BuildError {
     Rpc(irpc::Error),
     #[error("Connection error: {0}")]
     Connect(ConnectError),
+    #[error("Invalid endpoint label: {0}")]
+    InvalidLabel(#[from] anyhow::Error),
 }
 
 impl From<irpc::Error> for BuildError {
@@ -532,7 +546,7 @@ mod tests {
         Client,
         api_secret::ApiSecret,
         caps::{Cap, Caps},
-        client::API_SECRET_ENV_VAR_NAME,
+        client::{API_SECRET_ENV_VAR_NAME, BuildError},
     };
 
     #[tokio::test]
@@ -586,7 +600,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_name() {
+    async fn test_label() {
         let mut rng = rand::rng();
         let shared_secret = SecretKey::generate(&mut rng);
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
@@ -595,10 +609,20 @@ mod tests {
         let endpoint = Endpoint::empty_builder().bind().await.unwrap();
 
         let builder = Client::builder(&endpoint)
-            .name("my-node")
+            .label("my-node 👋")
+            .unwrap()
             .api_secret(api_secret)
             .unwrap();
 
-        assert_eq!(builder.name, Some("my-node".to_string()));
+        assert_eq!(builder.label, Some("my-node 👋".to_string()));
+
+        let too_long_name = "👋".repeat(1025);
+        let Err(err) = Client::builder(&endpoint).label(&too_long_name) else {
+            panic!("label should fail for strings over 1024 bytes");
+        };
+        assert!(matches!(
+            err.downcast_ref::<BuildError>(),
+            Some(BuildError::InvalidLabel(_))
+        ));
     }
 }

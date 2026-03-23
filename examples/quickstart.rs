@@ -9,7 +9,6 @@ async fn main() -> anyhow::Result<()> {
     // client will now push endpoint metrics to iroh-services
     let client = Client::builder(&endpoint)
         .api_secret_from_env()?
-        .name("quickstart-client")
         .build()
         .await?;
 
