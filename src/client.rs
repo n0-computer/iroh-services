@@ -21,7 +21,9 @@ use crate::protocol::PutNetworkDiagnostics;
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{ALPN, Auth, IrohServicesClient, Ping, Pong, PutMetrics, RemoteError},
+    protocol::{
+        ALPN, Auth, IrohServicesClient, LabelEndpoint, Ping, Pong, PutMetrics, RemoteError,
+    },
 };
 
 /// Client is the main handle for interacting with iroh-services. It communicates with
@@ -110,15 +112,17 @@ impl ClientBuilder {
         self
     }
 
-    /// Set an optional human-readable name for this endpoint, often used for
-    /// associating with other services in your app, like a database user id.
+    /// Set an optional human-readable name for this endpoint, making metrics
+    /// from this endpoint easier to identify. This is often used for associating
+    /// with other services in your app, like a database user id.
     ///
-    /// When set, this name is sent as part of authentication and associated
-    /// with the endpoint servers-side, making metrics from this endpoint
-    /// easier to identify in monitoring dashboards.
+    /// When this builder method is called, the provided label label is sent
+    /// after the client intially authenticates the endpoint server-side.
+    /// Errors will not interrupt client construction, instead producing a
+    /// warn-level log. For explicit error handling, use [`Client::set_label`].
     ///
     /// labels can be any UTF-8 string, with a min length of 2 bytes, and
-    /// maximum length of 128 bytes. label uniqueness is **not** enforced.
+    /// maximum length of 128 bytes. **label uniqueness is not enforced.**
     pub fn label(mut self, label: impl Into<String>) -> Result<Self> {
         let label = label.into();
         if label.len() < LABEL_MIN_LENGTH {
@@ -211,19 +215,29 @@ impl ClientBuilder {
         let capabilities = self.cap.ok_or(BuildError::MissingCapability)?;
 
         let conn = IrohLazyRemoteConnection::new(self.endpoint.clone(), remote, ALPN.to_vec());
-        let client = IrohServicesClient::boxed(conn);
+        let irpc_client = IrohServicesClient::boxed(conn);
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         let metrics_task = AbortOnDropHandle::new(n0_future::task::spawn(
             ClientActor {
                 capabilities,
-                client,
-                label: self.label,
+                client: irpc_client,
+                label: self.label.clone(),
                 session_id: Uuid::new_v4(),
                 authorized: false,
             }
             .run(self.registry, self.metrics_interval, rx),
         ));
+
+        if let Some(label) = &self.label {
+            let label = label.clone();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                if let Err(err) = set_label_inner(tx, label).await {
+                    warn!(err = %err, "setting endpoint label on startup");
+                }
+            });
+        }
 
         Ok(Client {
             endpoint: self.endpoint,
@@ -274,7 +288,7 @@ pub const LABEL_MAX_LENGTH: usize = 128;
 pub enum ValidateLabelError {
     #[error("Label is too long (must be no more than {LABEL_MAX_LENGTH} characters).")]
     TooLong,
-    #[error("LAbel is too short (must be at least {LABEL_MIN_LENGTH} characters).")]
+    #[error("Label is too short (must be at least {LABEL_MIN_LENGTH} characters).")]
     TooShort,
 }
 
@@ -291,6 +305,26 @@ pub enum Error {
 impl Client {
     pub fn builder(endpoint: &Endpoint) -> ClientBuilder {
         ClientBuilder::new(endpoint)
+    }
+
+    /// Read the current endpoint label from the local client.
+    pub async fn label(&self) -> Result<Option<String>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::ReadLabel { done: tx })
+            .await
+            .map_err(|_| Error::Other(anyhow!("sending ping request")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))
+    }
+
+    /// Label the active endpoint cloud-side.
+    ///
+    /// labels can be any UTF-8 string, with a min length of 2 bytes, and
+    /// maximum length of 128 bytes. **label uniqueness is not enforced.**
+    pub async fn set_label(&self, label: String) -> Result<(), Error> {
+        set_label_inner(self.message_channel.clone(), label).await
     }
 
     /// Pings the remote node.
@@ -393,6 +427,13 @@ enum ClientActorMessage {
         report: Box<DiagnosticsReport>,
         done: oneshot::Sender<Result<(), Error>>,
     },
+    ReadLabel {
+        done: oneshot::Sender<Option<String>>,
+    },
+    LabelEndpoint {
+        label: String,
+        done: oneshot::Sender<Result<(), RemoteError>>,
+    },
 }
 
 struct ClientActor {
@@ -441,6 +482,17 @@ impl ClientActor {
                                 warn!("failed to grant capability: {:#?}", err);
                             }
                         }
+                        ClientActorMessage::ReadLabel{ done } => {
+                            if let Err(err) = done.send(self.label.clone()) {
+                                warn!("sending label value: {:#?}", err);
+                            }
+                        }
+                        ClientActorMessage::LabelEndpoint{ label, done } => {
+                            let res = self.send_label_endpoint(label).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to label endpoint: {:#?}", err);
+                            }
+                        }
                         #[cfg(feature = "net_diagnostics")]
                         ClientActorMessage::PutNetworkDiagnostics{ report, done } => {
                             let res = self.put_network_diagnostics(*report).await;
@@ -474,11 +526,25 @@ impl ClientActor {
         }
         trace!("client authorizing");
         self.client
-            .rpc(Auth::new(self.capabilities.clone(), self.label.clone()))
+            .rpc(Auth {
+                caps: self.capabilities.clone(),
+            })
             .await
             .inspect_err(|e| debug!("authorization failed: {:?}", e))
             .map_err(|e| RemoteError::AuthError(e.to_string()))?;
         self.authorized = true;
+        Ok(())
+    }
+
+    async fn send_label_endpoint(&mut self, label: String) -> Result<(), RemoteError> {
+        trace!("client sending label endpoint request");
+        self.client
+            .rpc(LabelEndpoint {
+                label: label.clone(),
+            })
+            .await
+            .inspect_err(|e| debug!("label endpoint error: {e}"))
+            .map_err(|_| RemoteError::InternalServerError)??;
         Ok(())
     }
 
@@ -542,6 +608,20 @@ impl ClientActor {
 
         Ok(())
     }
+}
+
+async fn set_label_inner(
+    message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
+    label: String,
+) -> Result<(), Error> {
+    let (tx, rx) = oneshot::channel();
+    message_channel
+        .send(ClientActorMessage::LabelEndpoint { label, done: tx })
+        .await
+        .map_err(|_| Error::Other(anyhow!("sending label endpoint request")))?;
+    rx.await
+        .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+        .map_err(Error::Remote)
 }
 
 #[cfg(test)]

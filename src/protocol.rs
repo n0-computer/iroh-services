@@ -27,6 +27,9 @@ pub enum IrohServicesProtocol {
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     GrantCap(GrantCap),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    LabelEndpoint(LabelEndpoint),
 }
 
 /// Dedicated protocol for cloud-to-endpoint net diagnostics connections.
@@ -53,19 +56,9 @@ pub enum RemoteError {
 }
 
 /// Authentication on first request
-#[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Auth {
     pub caps: Rcan<Caps>,
-    /// Optional human-readable label for this endpoint
-    #[serde(default)]
-    pub label: Option<String>,
-}
-
-impl Auth {
-    pub fn new(caps: Rcan<Caps>, label: Option<String>) -> Self {
-        Auth { caps, label }
-    }
 }
 
 /// Request to store the given metrics data
@@ -106,51 +99,8 @@ pub struct GrantCap {
     pub cap: Rcan<Caps>,
 }
 
-#[cfg(test)]
-mod tests {
-    use iroh::SecretKey;
-    use n0_future::time::Duration;
-    use serde::{Deserialize, Serialize};
-
-    use super::Auth;
-    use crate::caps::{Caps, create_api_token_from_secret_key};
-
-    fn make_auth(name: Option<&str>) -> Auth {
-        let mut rng = rand::rng();
-        let secret = SecretKey::generate(&mut rng);
-        let id = SecretKey::generate(&mut rng).public();
-        let caps =
-            create_api_token_from_secret_key(secret, id, Duration::from_secs(60), Caps::default())
-                .unwrap();
-        Auth {
-            caps,
-            label: name.map(Into::into),
-        }
-    }
-
-    /// Simulates an old server/client that has no name field.
-    #[derive(Serialize, Deserialize)]
-    struct LegacyAuth {
-        caps: rcan::Rcan<Caps>,
-    }
-
-    #[test]
-    fn auth_name_round_trip() {
-        let auth = make_auth(Some("my-node"));
-        let bytes = postcard::to_stdvec(&auth).unwrap();
-        let decoded: Auth = postcard::from_bytes(&bytes).unwrap();
-        assert_eq!(decoded.label, Some("my-node".to_string()));
-    }
-
-    #[test]
-    fn auth_name_new_client_old_server_compat() {
-        // A new client sending Auth with name=None should produce bytes that an
-        // old server (represented here by LegacyAuth) can still decode successfully.
-        let auth = make_auth(None);
-        let bytes = postcard::to_stdvec(&auth).unwrap();
-
-        // Old server decodes, should still work
-        let legacy = postcard::from_bytes::<LegacyAuth>(&bytes).unwrap();
-        assert_eq!(auth.caps, legacy.caps);
-    }
+/// Label the client endpoint cloud-side with a string identifier.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LabelEndpoint {
+    pub label: String,
 }
