@@ -57,9 +57,9 @@
 <a href=#57 id=57 data-nosnippet>57</a>#[derive(Debug, Serialize, Deserialize)]
 <a href=#58 id=58 data-nosnippet>58</a></span><span class="kw">pub struct </span>Auth {
 <a href=#59 id=59 data-nosnippet>59</a>    <span class="kw">pub </span>caps: Rcan&lt;Caps&gt;,
-<a href=#60 id=60 data-nosnippet>60</a>    <span class="doccomment">/// Optional human-readable name for this endpoint
+<a href=#60 id=60 data-nosnippet>60</a>    <span class="doccomment">/// Optional human-readable label for this endpoint
 <a href=#61 id=61 data-nosnippet>61</a>    </span><span class="attr">#[serde(default)]
-<a href=#62 id=62 data-nosnippet>62</a>    </span><span class="kw">pub </span>name: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#62 id=62 data-nosnippet>62</a>    </span><span class="kw">pub </span>label: <span class="prelude-ty">Option</span>&lt;String&gt;,
 <a href=#63 id=63 data-nosnippet>63</a>}
 <a href=#64 id=64 data-nosnippet>64</a>
 <a href=#65 id=65 data-nosnippet>65</a><span class="doccomment">/// Request to store the given metrics data
@@ -118,7 +118,7 @@
 <a href=#118 id=118 data-nosnippet>118</a>                .unwrap();
 <a href=#119 id=119 data-nosnippet>119</a>        Auth {
 <a href=#120 id=120 data-nosnippet>120</a>            caps,
-<a href=#121 id=121 data-nosnippet>121</a>            name: name.map(Into::into),
+<a href=#121 id=121 data-nosnippet>121</a>            label: name.map(Into::into),
 <a href=#122 id=122 data-nosnippet>122</a>        }
 <a href=#123 id=123 data-nosnippet>123</a>    }
 <a href=#124 id=124 data-nosnippet>124</a>
@@ -133,7 +133,7 @@
 <a href=#133 id=133 data-nosnippet>133</a>        <span class="kw">let </span>auth = make_auth(<span class="prelude-val">Some</span>(<span class="string">"my-node"</span>));
 <a href=#134 id=134 data-nosnippet>134</a>        <span class="kw">let </span>bytes = postcard::to_stdvec(<span class="kw-2">&amp;</span>auth).unwrap();
 <a href=#135 id=135 data-nosnippet>135</a>        <span class="kw">let </span>decoded: Auth = postcard::from_bytes(<span class="kw-2">&amp;</span>bytes).unwrap();
-<a href=#136 id=136 data-nosnippet>136</a>        <span class="macro">assert_eq!</span>(decoded.name, <span class="prelude-val">Some</span>(<span class="string">"my-node"</span>.to_string()));
+<a href=#136 id=136 data-nosnippet>136</a>        <span class="macro">assert_eq!</span>(decoded.label, <span class="prelude-val">Some</span>(<span class="string">"my-node"</span>.to_string()));
 <a href=#137 id=137 data-nosnippet>137</a>    }
 <a href=#138 id=138 data-nosnippet>138</a>
 <a href=#139 id=139 data-nosnippet>139</a>    <span class="attr">#[test]
