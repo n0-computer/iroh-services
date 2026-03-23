@@ -21,7 +21,9 @@ use crate::protocol::PutNetworkDiagnostics;
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{ALPN, Auth, IrohServicesClient, Ping, Pong, PutMetrics, RemoteError},
+    protocol::{
+        ALPN, Auth, IrohServicesClient, LabelEndpoint, Ping, Pong, PutMetrics, RemoteError,
+    },
 };
 
 /// Client is the main handle for interacting with iroh-services. It communicates with
@@ -63,6 +65,7 @@ pub struct ClientBuilder {
     cap_expiry: Duration,
     cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
+    label: Option<String>,
     metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
@@ -80,6 +83,7 @@ impl ClientBuilder {
             cap: None,
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
+            label: None,
             metrics_interval: Some(Duration::from_secs(60)),
             remote: None,
             registry,
@@ -106,6 +110,29 @@ impl ClientBuilder {
     pub fn disable_metrics_interval(mut self) -> Self {
         self.metrics_interval = None;
         self
+    }
+
+    /// Set an optional human-readable name for this endpoint, making metrics
+    /// from this endpoint easier to identify. This is often used for associating
+    /// with other services in your app, like a database user id.
+    ///
+    /// When this builder method is called, the provided label label is sent
+    /// after the client initially authenticates the endpoint server-side.
+    /// Errors will not interrupt client construction, instead producing a
+    /// warn-level log. For explicit error handling, use [`Client::set_label`].
+    ///
+    /// labels can be any UTF-8 string, with a min length of 2 bytes, and
+    /// maximum length of 128 bytes. **label uniqueness is not enforced.**
+    pub fn label(mut self, label: impl Into<String>) -> Result<Self> {
+        let label = label.into();
+        if label.len() < LABEL_MIN_LENGTH {
+            return Err(BuildError::InvalidLabel(ValidateLabelError::TooShort).into());
+        } else if label.len() > LABEL_MAX_LENGTH {
+            return Err(BuildError::InvalidLabel(ValidateLabelError::TooLong).into());
+        }
+
+        self.label = Some(label);
+        Ok(self)
     }
 
     /// Check IROH_SERVICES_API_SECRET environment variable for a valid API secret
@@ -188,23 +215,34 @@ impl ClientBuilder {
         let capabilities = self.cap.ok_or(BuildError::MissingCapability)?;
 
         let conn = IrohLazyRemoteConnection::new(self.endpoint.clone(), remote, ALPN.to_vec());
-        let client = IrohServicesClient::boxed(conn);
+        let irpc_client = IrohServicesClient::boxed(conn);
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
-        let metrics_task = AbortOnDropHandle::new(n0_future::task::spawn(
+        let actor_task = AbortOnDropHandle::new(n0_future::task::spawn(
             ClientActor {
                 capabilities,
-                client,
+                client: irpc_client,
+                label: self.label.clone(),
                 session_id: Uuid::new_v4(),
                 authorized: false,
             }
             .run(self.registry, self.metrics_interval, rx),
         ));
 
+        if let Some(label) = &self.label {
+            let label = label.clone();
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                if let Err(err) = set_label_inner(tx, label).await {
+                    warn!(err = %err, "setting endpoint label on startup");
+                }
+            });
+        }
+
         Ok(Client {
             endpoint: self.endpoint,
             message_channel: tx,
-            _actor_task: Arc::new(metrics_task),
+            _actor_task: Arc::new(actor_task),
         })
     }
 }
@@ -223,6 +261,8 @@ pub enum BuildError {
     Rpc(irpc::Error),
     #[error("Connection error: {0}")]
     Connect(ConnectError),
+    #[error("Invalid endpoint label: {0}")]
+    InvalidLabel(#[from] ValidateLabelError),
 }
 
 impl From<irpc::Error> for BuildError {
@@ -241,6 +281,17 @@ impl From<irpc::Error> for BuildError {
     }
 }
 
+pub const LABEL_MIN_LENGTH: usize = 2;
+pub const LABEL_MAX_LENGTH: usize = 128;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ValidateLabelError {
+    #[error("Label is too long (must be no more than {LABEL_MAX_LENGTH} characters).")]
+    TooLong,
+    #[error("Label is too short (must be at least {LABEL_MIN_LENGTH} characters).")]
+    TooShort,
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Remote error: {0}")]
@@ -254,6 +305,26 @@ pub enum Error {
 impl Client {
     pub fn builder(endpoint: &Endpoint) -> ClientBuilder {
         ClientBuilder::new(endpoint)
+    }
+
+    /// Read the current endpoint label from the local client.
+    pub async fn label(&self) -> Result<Option<String>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::ReadLabel { done: tx })
+            .await
+            .map_err(|_| Error::Other(anyhow!("sending ping request")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))
+    }
+
+    /// Label the active endpoint cloud-side.
+    ///
+    /// labels can be any UTF-8 string, with a min length of 2 bytes, and
+    /// maximum length of 128 bytes. **label uniqueness is not enforced.**
+    pub async fn set_label(&self, label: String) -> Result<(), Error> {
+        set_label_inner(self.message_channel.clone(), label).await
     }
 
     /// Pings the remote node.
@@ -356,11 +427,19 @@ enum ClientActorMessage {
         report: Box<DiagnosticsReport>,
         done: oneshot::Sender<Result<(), Error>>,
     },
+    ReadLabel {
+        done: oneshot::Sender<Option<String>>,
+    },
+    LabelEndpoint {
+        label: String,
+        done: oneshot::Sender<Result<(), RemoteError>>,
+    },
 }
 
 struct ClientActor {
     capabilities: Rcan<Caps>,
     client: IrohServicesClient,
+    label: Option<String>,
     session_id: Uuid,
     authorized: bool,
 }
@@ -401,6 +480,17 @@ impl ClientActor {
                             let res = self.grant_cap(*cap).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to grant capability: {:#?}", err);
+                            }
+                        }
+                        ClientActorMessage::ReadLabel{ done } => {
+                            if let Err(err) = done.send(self.label.clone()) {
+                                warn!("sending label value: {:#?}", err);
+                            }
+                        }
+                        ClientActorMessage::LabelEndpoint{ label, done } => {
+                            let res = self.send_label_endpoint(label).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to label endpoint: {:#?}", err);
                             }
                         }
                         #[cfg(feature = "net_diagnostics")]
@@ -458,6 +548,20 @@ impl ClientActor {
             .map_err(|_| RemoteError::InternalServerError)
     }
 
+    async fn send_label_endpoint(&mut self, label: String) -> Result<(), RemoteError> {
+        trace!("client sending label endpoint request");
+        self.auth().await?;
+
+        self.client
+            .rpc(LabelEndpoint {
+                label: label.clone(),
+            })
+            .await
+            .inspect_err(|e| debug!("label endpoint error: {e}"))
+            .map_err(|_| RemoteError::InternalServerError)??;
+        Ok(())
+    }
+
     async fn send_metrics(&mut self, encoder: &mut Encoder) -> Result<(), RemoteError> {
         trace!("client actor send metrics");
         self.auth().await?;
@@ -508,6 +612,21 @@ impl ClientActor {
     }
 }
 
+async fn set_label_inner(
+    message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
+    label: String,
+) -> Result<(), Error> {
+    debug!(label=%label, "calling set label");
+    let (tx, rx) = oneshot::channel();
+    message_channel
+        .send(ClientActorMessage::LabelEndpoint { label, done: tx })
+        .await
+        .map_err(|_| Error::Other(anyhow!("sending label endpoint request")))?;
+    rx.await
+        .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+        .map_err(Error::Remote)
+}
+
 #[cfg(test)]
 mod tests {
     use iroh::{Endpoint, EndpointAddr, SecretKey};
@@ -517,7 +636,7 @@ mod tests {
         Client,
         api_secret::ApiSecret,
         caps::{Cap, Caps},
-        client::API_SECRET_ENV_VAR_NAME,
+        client::{API_SECRET_ENV_VAR_NAME, BuildError, ValidateLabelError},
     };
 
     #[tokio::test]
@@ -568,5 +687,40 @@ mod tests {
 
         let err = client.push_metrics().await;
         assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_label() {
+        let mut rng = rand::rng();
+        let shared_secret = SecretKey::generate(&mut rng);
+        let fake_endpoint_id = SecretKey::generate(&mut rng).public();
+        let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+
+        let endpoint = Endpoint::empty_builder().bind().await.unwrap();
+
+        let builder = Client::builder(&endpoint)
+            .label("my-node 👋")
+            .unwrap()
+            .api_secret(api_secret)
+            .unwrap();
+
+        assert_eq!(builder.label, Some("my-node 👋".to_string()));
+
+        let Err(err) = Client::builder(&endpoint).label("a") else {
+            panic!("label should fail for strings under 2 bytes");
+        };
+        assert!(matches!(
+            err.downcast_ref::<BuildError>(),
+            Some(BuildError::InvalidLabel(ValidateLabelError::TooShort))
+        ));
+
+        let too_long_name = "👋".repeat(129);
+        let Err(err) = Client::builder(&endpoint).label(&too_long_name) else {
+            panic!("label should fail for strings over 1024 bytes");
+        };
+        assert!(matches!(
+            err.downcast_ref::<BuildError>(),
+            Some(BuildError::InvalidLabel(ValidateLabelError::TooLong))
+        ));
     }
 }

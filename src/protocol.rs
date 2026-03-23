@@ -27,6 +27,9 @@ pub enum IrohServicesProtocol {
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     GrantCap(GrantCap),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    LabelEndpoint(LabelEndpoint),
 }
 
 /// Dedicated protocol for cloud-to-endpoint net diagnostics connections.
@@ -94,4 +97,10 @@ pub struct RunNetworkDiagnostics;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GrantCap {
     pub cap: Rcan<Caps>,
+}
+
+/// Label the client endpoint cloud-side with a string identifier.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LabelEndpoint {
+    pub label: String,
 }

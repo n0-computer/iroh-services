@@ -18,6 +18,8 @@ use iroh_services::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+
     // 1. Create an endpoint that will both dial iroh-services and accept incoming
     //    requests from the iroh-services service via a ClientHost.
     let endpoint = Endpoint::bind(presets::N0).await?;
@@ -26,9 +28,15 @@ async fn main() -> Result<()> {
     //    EndpointID. Normally we'd pass it straight to the client builder.
     let secret = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
 
+    // optional: label the endpoint. Here we generate a label from the endpoint,
+    // in your app this would be used to connect with something like a userId
+    let id = endpoint.id().to_string();
+    let label = format!("net-diagnostics-example-{}", &id[..8]);
+
     // 3. Build a Client that dials iroh-services (as in all other examples).
     let client = Client::builder(&endpoint)
         .api_secret(secret.clone())?
+        .label(label)?
         .build()
         .await?;
 
