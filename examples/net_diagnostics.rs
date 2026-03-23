@@ -18,6 +18,8 @@ use iroh_services::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+
     // 1. Create an endpoint that will both dial iroh-services and accept incoming
     //    requests from the iroh-services service via a ClientHost.
     let endpoint = Endpoint::bind(presets::N0).await?;

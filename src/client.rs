@@ -117,7 +117,7 @@ impl ClientBuilder {
     /// with other services in your app, like a database user id.
     ///
     /// When this builder method is called, the provided label label is sent
-    /// after the client intially authenticates the endpoint server-side.
+    /// after the client initially authenticates the endpoint server-side.
     /// Errors will not interrupt client construction, instead producing a
     /// warn-level log. For explicit error handling, use [`Client::set_label`].
     ///
@@ -218,7 +218,7 @@ impl ClientBuilder {
         let irpc_client = IrohServicesClient::boxed(conn);
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
-        let metrics_task = AbortOnDropHandle::new(n0_future::task::spawn(
+        let actor_task = AbortOnDropHandle::new(n0_future::task::spawn(
             ClientActor {
                 capabilities,
                 client: irpc_client,
@@ -242,7 +242,7 @@ impl ClientBuilder {
         Ok(Client {
             endpoint: self.endpoint,
             message_channel: tx,
-            _actor_task: Arc::new(metrics_task),
+            _actor_task: Arc::new(actor_task),
         })
     }
 }
@@ -536,18 +536,6 @@ impl ClientActor {
         Ok(())
     }
 
-    async fn send_label_endpoint(&mut self, label: String) -> Result<(), RemoteError> {
-        trace!("client sending label endpoint request");
-        self.client
-            .rpc(LabelEndpoint {
-                label: label.clone(),
-            })
-            .await
-            .inspect_err(|e| debug!("label endpoint error: {e}"))
-            .map_err(|_| RemoteError::InternalServerError)??;
-        Ok(())
-    }
-
     async fn send_ping(&mut self) -> Result<Pong, RemoteError> {
         trace!("client actor send ping");
         self.auth().await?;
@@ -558,6 +546,20 @@ impl ClientActor {
             .await
             .inspect_err(|e| warn!("rpc ping error: {e}"))
             .map_err(|_| RemoteError::InternalServerError)
+    }
+
+    async fn send_label_endpoint(&mut self, label: String) -> Result<(), RemoteError> {
+        trace!("client sending label endpoint request");
+        self.auth().await?;
+
+        self.client
+            .rpc(LabelEndpoint {
+                label: label.clone(),
+            })
+            .await
+            .inspect_err(|e| debug!("label endpoint error: {e}"))
+            .map_err(|_| RemoteError::InternalServerError)??;
+        Ok(())
     }
 
     async fn send_metrics(&mut self, encoder: &mut Encoder) -> Result<(), RemoteError> {
@@ -614,6 +616,7 @@ async fn set_label_inner(
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
     label: String,
 ) -> Result<(), Error> {
+    debug!(label=%label, "calling set label");
     let (tx, rx) = oneshot::channel();
     message_channel
         .send(ClientActorMessage::LabelEndpoint { label, done: tx })
