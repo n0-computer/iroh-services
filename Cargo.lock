@@ -2821,8 +2821,6 @@ dependencies = [
 [[package]]
 name = "rcan"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "725eb86d019799495be1164a962cbaf8f8cd1553e0f1e602d8fd6671fc619498"
 dependencies = [
  "anyhow",
  "blake3",

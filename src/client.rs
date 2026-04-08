@@ -9,7 +9,8 @@ use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
 use irpc_iroh::IrohLazyRemoteConnection;
 use n0_error::StackResultExt;
 use n0_future::{task::AbortOnDropHandle, time::Duration};
-use rcan::Rcan;
+use rcan::{Expires, Rcan};
+use std::time::SystemTime;
 use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
@@ -22,7 +23,8 @@ use crate::{
     api_secret::ApiSecret,
     caps::Caps,
     protocol::{
-        ALPN, Auth, IrohServicesClient, LabelEndpoint, Ping, Pong, PutMetrics, RemoteError,
+        ALPN, Auth, IrohServicesClient, LabelEndpoint, Ping, Pong, PutMetrics, RefreshAuthToken,
+        RemoteError,
     },
 };
 
@@ -408,6 +410,41 @@ impl Client {
     }
 }
 
+/// Compute the next time the client should attempt a token refresh.
+///
+/// Strategy:
+/// - If the token never expires, no refresh is needed.
+/// - If already expired, refresh immediately.
+/// - In the last 72 hours before expiry, refresh every hour.
+/// - Otherwise, refresh at the halfway point of remaining lifetime.
+fn next_refresh_at(token: &Rcan<Caps>) -> Option<tokio::time::Instant> {
+    let now_secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("now is after UNIX_EPOCH")
+        .as_secs();
+    let expires_at = match token.expires() {
+        Expires::At(t) => *t,
+        Expires::Never => return None,
+    };
+
+    let remaining = expires_at.saturating_sub(now_secs);
+    let seventy_two_hours: u64 = 72 * 3600;
+
+    let delay_secs = if remaining == 0 {
+        // expired, refresh now
+        0
+    } else if remaining > seventy_two_hours {
+        // plenty of time left, refresh at halfway point
+        remaining / 2
+    } else {
+        // in the last 72 hours: refresh hourly, or at remaining/2 if
+        // the token lifetime is very short
+        3600.min(remaining / 2).max(1)
+    };
+
+    Some(tokio::time::Instant::now() + Duration::from_secs(delay_secs))
+}
+
 enum ClientActorMessage {
     SendMetrics {
         done: oneshot::Sender<Result<(), RemoteError>>,
@@ -515,6 +552,17 @@ impl ClientActor {
                         self.authorized = false;
                     }
                 },
+                _ = async {
+                    match next_refresh_at(&self.capabilities) {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    trace!("token refresh tick");
+                    if let Err(err) = self.refresh_token().await {
+                        warn!("token refresh failed: {err:?}");
+                    }
+                },
             }
         }
     }
@@ -559,6 +607,24 @@ impl ClientActor {
             .await
             .inspect_err(|e| debug!("label endpoint error: {e}"))
             .map_err(|_| RemoteError::InternalServerError)??;
+        Ok(())
+    }
+
+    async fn refresh_token(&mut self) -> Result<(), RemoteError> {
+        trace!("client refreshing auth token");
+        self.auth().await?;
+
+        let resp = self
+            .client
+            .rpc(RefreshAuthToken {
+                original: self.capabilities.clone(),
+            })
+            .await
+            .inspect_err(|e| debug!("token refresh error: {e}"))
+            .map_err(|_| RemoteError::InternalServerError)??;
+        self.capabilities = resp.updated;
+        self.authorized = false;
+        self.auth().await?; // proactively re-auth with the new token
         Ok(())
     }
 
@@ -687,6 +753,163 @@ mod tests {
 
         let err = client.push_metrics().await;
         assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_token_refresh() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU32, Ordering},
+        };
+
+        use iroh::{
+            address_lookup::MemoryLookup,
+            endpoint::Connection,
+            protocol::{AcceptError, ProtocolHandler, Router},
+        };
+        use irpc::WithChannels;
+        use irpc_iroh::read_request;
+        use n0_error::AnyError;
+        use n0_future::time::Duration;
+
+        use crate::{
+            caps::create_api_token_from_secret_key,
+            protocol::{
+                ALPN, IrohServicesProtocol, Pong, RefreshAuthTokenResponse, ServicesMessage,
+            },
+        };
+
+        /// Mock server that handles Auth, Ping, and RefreshAuthToken.
+        #[derive(Debug)]
+        struct MockServer {
+            endpoint: Endpoint,
+            refresh_count: Arc<AtomicU32>,
+        }
+
+        impl ProtocolHandler for MockServer {
+            async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+                self.handle_connection(connection).await.map_err(|e| {
+                    let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
+                    AcceptError::from(AnyError::from(boxed))
+                })
+            }
+        }
+
+        impl MockServer {
+            async fn handle_connection(&self, connection: Connection) -> anyhow::Result<()> {
+                let remote_node_id = connection.remote_id();
+
+                // First message must be Auth
+                let Some(first_request) = read_request::<IrohServicesProtocol>(&connection).await?
+                else {
+                    return Ok(());
+                };
+
+                let ServicesMessage::Auth(WithChannels { inner: _, tx, .. }) = first_request else {
+                    connection.close(400u32.into(), b"Expected initial auth message");
+                    return Ok(());
+                };
+                tx.send(()).await?;
+
+                // Handle subsequent requests in a loop
+                loop {
+                    let Some(request) = read_request::<IrohServicesProtocol>(&connection).await?
+                    else {
+                        return Ok(());
+                    };
+
+                    match request {
+                        ServicesMessage::Auth(WithChannels { tx, .. }) => {
+                            tx.send(()).await?;
+                        }
+                        ServicesMessage::Ping(WithChannels { inner, tx, .. }) => {
+                            tx.send(Pong {
+                                req_id: inner.req_id,
+                            })
+                            .await?;
+                        }
+                        ServicesMessage::RefreshAuthToken(WithChannels {
+                            inner: _, tx, ..
+                        }) => {
+                            self.refresh_count.fetch_add(1, Ordering::Relaxed);
+                            // Issue a fresh token with a short expiry
+                            let new_cap = create_api_token_from_secret_key(
+                                self.endpoint.secret_key().clone(),
+                                remote_node_id,
+                                Duration::from_secs(4),
+                                Caps::for_shared_secret(),
+                            )
+                            .unwrap();
+                            tx.send(Ok(RefreshAuthTokenResponse { updated: new_cap }))
+                                .await?;
+                        }
+                        _ => {
+                            // Ignore other messages
+                        }
+                    }
+                }
+            }
+        }
+
+        let lookup = MemoryLookup::new();
+        let server_ep = Endpoint::empty_builder()
+            .address_lookup(lookup.clone())
+            .bind()
+            .await
+            .unwrap();
+
+        let client_ep = Endpoint::empty_builder()
+            .address_lookup(lookup.clone())
+            .bind()
+            .await
+            .unwrap();
+
+        let refresh_count = Arc::new(AtomicU32::new(0));
+        let mock = MockServer {
+            endpoint: server_ep.clone(),
+            refresh_count: refresh_count.clone(),
+        };
+
+        let router = Router::builder(server_ep.clone())
+            .accept(ALPN, mock)
+            .spawn();
+
+        // Create a short-lived token (4 seconds) so refresh fires at ~2 seconds
+        let cap = create_api_token_from_secret_key(
+            server_ep.secret_key().clone(),
+            client_ep.id(),
+            Duration::from_secs(4),
+            Caps::for_shared_secret(),
+        )
+        .unwrap();
+
+        let client = Client::builder(&client_ep)
+            .disable_metrics_interval()
+            .remote(server_ep.addr())
+            .rcan(cap)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+
+        // Initial ping should work
+        let pong = client.ping().await;
+        assert!(pong.is_ok(), "initial ping should succeed");
+
+        // Wait for refresh to happen (token is 4s, refresh at ~2s)
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        assert!(
+            refresh_count.load(Ordering::Relaxed) >= 1,
+            "expected at least one token refresh"
+        );
+
+        // Ping should still work after refresh
+        let pong = client.ping().await;
+        assert!(pong.is_ok(), "ping after refresh should succeed");
+
+        router.shutdown().await.unwrap();
+        client_ep.close().await;
     }
 
     #[tokio::test]

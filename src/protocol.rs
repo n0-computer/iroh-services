@@ -30,6 +30,9 @@ pub enum IrohServicesProtocol {
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     LabelEndpoint(LabelEndpoint),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<RefreshAuthTokenResponse>>)]
+    RefreshAuthToken(RefreshAuthToken),
 }
 
 /// Dedicated protocol for cloud-to-endpoint net diagnostics connections.
@@ -103,4 +106,16 @@ pub struct GrantCap {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LabelEndpoint {
     pub label: String,
+}
+
+/// Request an updated authorization token
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RefreshAuthToken {
+    pub original: Rcan<Caps>,
+}
+
+/// Successful response from server with updated token
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RefreshAuthTokenResponse {
+    pub updated: Rcan<Caps>,
 }
