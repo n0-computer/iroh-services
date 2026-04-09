@@ -112,26 +112,29 @@ impl ClientBuilder {
         self
     }
 
-    /// Set an optional human-readable name for this endpoint, making metrics
-    /// from this endpoint easier to identify. This is often used for associating
-    /// with other services in your app, like a database user id.
+    /// Set an optional human-readable name for the endpoint the client is
+    /// constructed with, making metrics from this endpoint easier to identify.
+    /// This is often used for associating with other services in your app,
+    /// like a database user id, machine name, permanent username, etc.
     ///
-    /// When this builder method is called, the provided label label is sent
-    /// after the client initially authenticates the endpoint server-side.
+    /// When this builder method is called, the provided name is sent after the
+    /// client initially authenticates the endpoint server-side.
     /// Errors will not interrupt client construction, instead producing a
     /// warn-level log. For explicit error handling, use [`Client::set_label`].
     ///
     /// labels can be any UTF-8 string, with a min length of 2 bytes, and
-    /// maximum length of 128 bytes. **label uniqueness is not enforced.**
-    pub fn label(mut self, label: impl Into<String>) -> Result<Self> {
-        let label = label.into();
-        if label.len() < LABEL_MIN_LENGTH {
+    /// maximum length of 128 bytes. **name uniqueness is not enforced
+    /// server-side**, which means using the same name for different endpoints
+    /// will not produce an error
+    pub fn name(mut self, name: impl Into<String>) -> Result<Self> {
+        let name = name.into();
+        if name.len() < CLIENT_NAME_MIN_LENGTH {
             return Err(BuildError::InvalidLabel(ValidateLabelError::TooShort).into());
-        } else if label.len() > LABEL_MAX_LENGTH {
+        } else if name.len() > CLIENT_NAME_MAX_LENGTH {
             return Err(BuildError::InvalidLabel(ValidateLabelError::TooLong).into());
         }
 
-        self.label = Some(label);
+        self.label = Some(name);
         Ok(self)
     }
 
@@ -281,14 +284,14 @@ impl From<irpc::Error> for BuildError {
     }
 }
 
-pub const LABEL_MIN_LENGTH: usize = 2;
-pub const LABEL_MAX_LENGTH: usize = 128;
+pub const CLIENT_NAME_MIN_LENGTH: usize = 2;
+pub const CLIENT_NAME_MAX_LENGTH: usize = 128;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ValidateLabelError {
-    #[error("Label is too long (must be no more than {LABEL_MAX_LENGTH} characters).")]
+    #[error("Label is too long (must be no more than {CLIENT_NAME_MAX_LENGTH} characters).")]
     TooLong,
-    #[error("Label is too short (must be at least {LABEL_MIN_LENGTH} characters).")]
+    #[error("Label is too short (must be at least {CLIENT_NAME_MIN_LENGTH} characters).")]
     TooShort,
 }
 
@@ -699,14 +702,14 @@ mod tests {
         let endpoint = Endpoint::empty_builder().bind().await.unwrap();
 
         let builder = Client::builder(&endpoint)
-            .label("my-node 👋")
+            .name("my-node 👋")
             .unwrap()
             .api_secret(api_secret)
             .unwrap();
 
         assert_eq!(builder.label, Some("my-node 👋".to_string()));
 
-        let Err(err) = Client::builder(&endpoint).label("a") else {
+        let Err(err) = Client::builder(&endpoint).name("a") else {
             panic!("label should fail for strings under 2 bytes");
         };
         assert!(matches!(
@@ -715,7 +718,7 @@ mod tests {
         ));
 
         let too_long_name = "👋".repeat(129);
-        let Err(err) = Client::builder(&endpoint).label(&too_long_name) else {
+        let Err(err) = Client::builder(&endpoint).name(&too_long_name) else {
             panic!("label should fail for strings over 1024 bytes");
         };
         assert!(matches!(
