@@ -21,9 +21,7 @@ use crate::protocol::PutNetworkDiagnostics;
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{
-        ALPN, Auth, IrohServicesClient, LabelEndpoint, Ping, Pong, PutMetrics, RemoteError,
-    },
+    protocol::{ALPN, Auth, IrohServicesClient, NameEndpoint, Ping, Pong, PutMetrics, RemoteError},
 };
 
 /// Client is the main handle for interacting with iroh-services. It communicates with
@@ -65,7 +63,7 @@ pub struct ClientBuilder {
     cap_expiry: Duration,
     cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
-    label: Option<String>,
+    name: Option<String>,
     metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
@@ -83,7 +81,7 @@ impl ClientBuilder {
             cap: None,
             cap_expiry: DEFAULT_CAP_EXPIRY,
             endpoint: endpoint.clone(),
-            label: None,
+            name: None,
             metrics_interval: Some(Duration::from_secs(60)),
             remote: None,
             registry,
@@ -120,21 +118,21 @@ impl ClientBuilder {
     /// When this builder method is called, the provided name is sent after the
     /// client initially authenticates the endpoint server-side.
     /// Errors will not interrupt client construction, instead producing a
-    /// warn-level log. For explicit error handling, use [`Client::set_label`].
+    /// warn-level log. For explicit error handling, use [`Client::set_name`].
     ///
-    /// labels can be any UTF-8 string, with a min length of 2 bytes, and
+    /// names can be any UTF-8 string, with a min length of 2 bytes, and
     /// maximum length of 128 bytes. **name uniqueness is not enforced
     /// server-side**, which means using the same name for different endpoints
     /// will not produce an error
     pub fn name(mut self, name: impl Into<String>) -> Result<Self> {
         let name = name.into();
         if name.len() < CLIENT_NAME_MIN_LENGTH {
-            return Err(BuildError::InvalidLabel(ValidateLabelError::TooShort).into());
+            return Err(BuildError::InvalidName(ValidateNameError::TooShort).into());
         } else if name.len() > CLIENT_NAME_MAX_LENGTH {
-            return Err(BuildError::InvalidLabel(ValidateLabelError::TooLong).into());
+            return Err(BuildError::InvalidName(ValidateNameError::TooLong).into());
         }
 
-        self.label = Some(name);
+        self.name = Some(name);
         Ok(self)
     }
 
@@ -225,18 +223,18 @@ impl ClientBuilder {
             ClientActor {
                 capabilities,
                 client: irpc_client,
-                label: self.label.clone(),
+                name: self.name.clone(),
                 session_id: Uuid::new_v4(),
                 authorized: false,
             }
             .run(self.registry, self.metrics_interval, rx),
         ));
 
-        if let Some(label) = &self.label {
-            let label = label.clone();
+        if let Some(name) = &self.name {
+            let name = name.clone();
             let tx = tx.clone();
             tokio::spawn(async move {
-                if let Err(err) = set_label_inner(tx, label).await {
+                if let Err(err) = set_name_inner(tx, name).await {
                     warn!(err = %err, "setting endpoint label on startup");
                 }
             });
@@ -264,8 +262,8 @@ pub enum BuildError {
     Rpc(irpc::Error),
     #[error("Connection error: {0}")]
     Connect(ConnectError),
-    #[error("Invalid endpoint label: {0}")]
-    InvalidLabel(#[from] ValidateLabelError),
+    #[error("Invalid endpoint name: {0}")]
+    InvalidName(#[from] ValidateNameError),
 }
 
 impl From<irpc::Error> for BuildError {
@@ -288,10 +286,10 @@ pub const CLIENT_NAME_MIN_LENGTH: usize = 2;
 pub const CLIENT_NAME_MAX_LENGTH: usize = 128;
 
 #[derive(Debug, thiserror::Error)]
-pub enum ValidateLabelError {
-    #[error("Label is too long (must be no more than {CLIENT_NAME_MAX_LENGTH} characters).")]
+pub enum ValidateNameError {
+    #[error("Name is too long (must be no more than {CLIENT_NAME_MAX_LENGTH} characters).")]
     TooLong,
-    #[error("Label is too short (must be at least {CLIENT_NAME_MIN_LENGTH} characters).")]
+    #[error("Name is too short (must be at least {CLIENT_NAME_MIN_LENGTH} characters).")]
     TooShort,
 }
 
@@ -310,11 +308,11 @@ impl Client {
         ClientBuilder::new(endpoint)
     }
 
-    /// Read the current endpoint label from the local client.
-    pub async fn label(&self) -> Result<Option<String>, Error> {
+    /// Read the current endpoint name from the local client.
+    pub async fn name(&self) -> Result<Option<String>, Error> {
         let (tx, rx) = oneshot::channel();
         self.message_channel
-            .send(ClientActorMessage::ReadLabel { done: tx })
+            .send(ClientActorMessage::ReadName { done: tx })
             .await
             .map_err(|_| Error::Other(anyhow!("sending ping request")))?;
 
@@ -322,12 +320,12 @@ impl Client {
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))
     }
 
-    /// Label the active endpoint cloud-side.
+    /// Name the active endpoint cloud-side.
     ///
-    /// labels can be any UTF-8 string, with a min length of 2 bytes, and
+    /// names can be any UTF-8 string, with a min length of 2 bytes, and
     /// maximum length of 128 bytes. **label uniqueness is not enforced.**
-    pub async fn set_label(&self, label: String) -> Result<(), Error> {
-        set_label_inner(self.message_channel.clone(), label).await
+    pub async fn set_name(&self, name: String) -> Result<(), Error> {
+        set_name_inner(self.message_channel.clone(), name).await
     }
 
     /// Pings the remote node.
@@ -430,7 +428,7 @@ enum ClientActorMessage {
         report: Box<DiagnosticsReport>,
         done: oneshot::Sender<Result<(), Error>>,
     },
-    ReadLabel {
+    ReadName {
         done: oneshot::Sender<Option<String>>,
     },
     LabelEndpoint {
@@ -442,7 +440,7 @@ enum ClientActorMessage {
 struct ClientActor {
     capabilities: Rcan<Caps>,
     client: IrohServicesClient,
-    label: Option<String>,
+    name: Option<String>,
     session_id: Uuid,
     authorized: bool,
 }
@@ -485,8 +483,8 @@ impl ClientActor {
                                 warn!("failed to grant capability: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::ReadLabel{ done } => {
-                            if let Err(err) = done.send(self.label.clone()) {
+                        ClientActorMessage::ReadName{ done } => {
+                            if let Err(err) = done.send(self.name.clone()) {
                                 warn!("sending label value: {:#?}", err);
                             }
                         }
@@ -556,8 +554,8 @@ impl ClientActor {
         self.auth().await?;
 
         self.client
-            .rpc(LabelEndpoint {
-                label: label.clone(),
+            .rpc(NameEndpoint {
+                name: label.clone(),
             })
             .await
             .inspect_err(|e| debug!("label endpoint error: {e}"))
@@ -615,7 +613,7 @@ impl ClientActor {
     }
 }
 
-async fn set_label_inner(
+async fn set_name_inner(
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
     label: String,
 ) -> Result<(), Error> {
@@ -639,7 +637,7 @@ mod tests {
         Client,
         api_secret::ApiSecret,
         caps::{Cap, Caps},
-        client::{API_SECRET_ENV_VAR_NAME, BuildError, ValidateLabelError},
+        client::{API_SECRET_ENV_VAR_NAME, BuildError, ValidateNameError},
     };
 
     #[tokio::test]
@@ -707,14 +705,14 @@ mod tests {
             .api_secret(api_secret)
             .unwrap();
 
-        assert_eq!(builder.label, Some("my-node 👋".to_string()));
+        assert_eq!(builder.name, Some("my-node 👋".to_string()));
 
         let Err(err) = Client::builder(&endpoint).name("a") else {
             panic!("label should fail for strings under 2 bytes");
         };
         assert!(matches!(
             err.downcast_ref::<BuildError>(),
-            Some(BuildError::InvalidLabel(ValidateLabelError::TooShort))
+            Some(BuildError::InvalidName(ValidateNameError::TooShort))
         ));
 
         let too_long_name = "👋".repeat(129);
@@ -723,7 +721,7 @@ mod tests {
         };
         assert!(matches!(
             err.downcast_ref::<BuildError>(),
-            Some(BuildError::InvalidLabel(ValidateLabelError::TooLong))
+            Some(BuildError::InvalidName(ValidateNameError::TooLong))
         ));
     }
 }

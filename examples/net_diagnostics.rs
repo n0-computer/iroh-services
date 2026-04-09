@@ -28,9 +28,9 @@ async fn main() -> Result<()> {
     //    EndpointID. Normally we'd pass it straight to the client builder.
     let secret = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
 
-    // optional: name the endpoint. Here we generate a label from the endpoint,
-    // in your app this would be used to connect with something like a userId
-    // or machine name
+    // optional: name the endpoint. Here we generate a name from the endpoint id
+    // to keep name unique. in your app this would be used to connect with
+    // something like a userId or machine name
     let id = endpoint.id().to_string();
     let name = format!("net-diagnostics-example-{}", &id[..8]);
 
