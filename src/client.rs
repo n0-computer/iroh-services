@@ -314,7 +314,7 @@ impl Client {
         self.message_channel
             .send(ClientActorMessage::ReadName { done: tx })
             .await
-            .map_err(|_| Error::Other(anyhow!("sending ping request")))?;
+            .map_err(|_| Error::Other(anyhow!("sending name read request")))?;
 
         rx.await
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))
@@ -431,8 +431,8 @@ enum ClientActorMessage {
     ReadName {
         done: oneshot::Sender<Option<String>>,
     },
-    LabelEndpoint {
-        label: String,
+    NameEndpoint {
+        name: String,
         done: oneshot::Sender<Result<(), RemoteError>>,
     },
 }
@@ -488,8 +488,8 @@ impl ClientActor {
                                 warn!("sending label value: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::LabelEndpoint{ label, done } => {
-                            let res = self.send_label_endpoint(label).await;
+                        ClientActorMessage::NameEndpoint{ name, done } => {
+                            let res = self.send_name_endpoint(name).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to label endpoint: {:#?}", err);
                             }
@@ -549,8 +549,8 @@ impl ClientActor {
             .map_err(|_| RemoteError::InternalServerError)
     }
 
-    async fn send_label_endpoint(&mut self, label: String) -> Result<(), RemoteError> {
-        trace!("client sending label endpoint request");
+    async fn send_name_endpoint(&mut self, label: String) -> Result<(), RemoteError> {
+        trace!("client sending name endpoint request");
         self.auth().await?;
 
         self.client
@@ -558,7 +558,7 @@ impl ClientActor {
                 name: label.clone(),
             })
             .await
-            .inspect_err(|e| debug!("label endpoint error: {e}"))
+            .inspect_err(|e| debug!("name endpoint error: {e}"))
             .map_err(|_| RemoteError::InternalServerError)??;
         Ok(())
     }
@@ -615,14 +615,14 @@ impl ClientActor {
 
 async fn set_name_inner(
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
-    label: String,
+    name: String,
 ) -> Result<(), Error> {
-    debug!(label=%label, "calling set label");
+    debug!(name_len = name.len(), "calling set name");
     let (tx, rx) = oneshot::channel();
     message_channel
-        .send(ClientActorMessage::LabelEndpoint { label, done: tx })
+        .send(ClientActorMessage::NameEndpoint { name, done: tx })
         .await
-        .map_err(|_| Error::Other(anyhow!("sending label endpoint request")))?;
+        .map_err(|_| Error::Other(anyhow!("sending name endpoint request")))?;
     rx.await
         .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
         .map_err(Error::Remote)
@@ -691,7 +691,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_label() {
+    async fn test_name() {
         let mut rng = rand::rng();
         let shared_secret = SecretKey::generate(&mut rng);
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
@@ -717,7 +717,7 @@ mod tests {
 
         let too_long_name = "👋".repeat(129);
         let Err(err) = Client::builder(&endpoint).name(&too_long_name) else {
-            panic!("label should fail for strings over 1024 bytes");
+            panic!("label should fail for strings over 128 bytes");
         };
         assert!(matches!(
             err.downcast_ref::<BuildError>(),
