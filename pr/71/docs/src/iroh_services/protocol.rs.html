@@ -29,7 +29,7 @@
 <a href=#29 id=29 data-nosnippet>29</a>    </span>GrantCap(GrantCap),
 <a href=#30 id=30 data-nosnippet>30</a>
 <a href=#31 id=31 data-nosnippet>31</a>    <span class="attr">#[rpc(tx=oneshot::Sender&lt;RemoteResult&lt;()&gt;&gt;)]
-<a href=#32 id=32 data-nosnippet>32</a>    </span>LabelEndpoint(LabelEndpoint),
+<a href=#32 id=32 data-nosnippet>32</a>    </span>LabelEndpoint(NameEndpoint),
 <a href=#33 id=33 data-nosnippet>33</a>}
 <a href=#34 id=34 data-nosnippet>34</a>
 <a href=#35 id=35 data-nosnippet>35</a><span class="doccomment">/// Dedicated protocol for cloud-to-endpoint net diagnostics connections.
@@ -101,7 +101,7 @@
 <a href=#101 id=101 data-nosnippet>101</a>
 <a href=#102 id=102 data-nosnippet>102</a><span class="doccomment">/// Label the client endpoint cloud-side with a string identifier.
 <a href=#103 id=103 data-nosnippet>103</a></span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
-<a href=#104 id=104 data-nosnippet>104</a></span><span class="kw">pub struct </span>LabelEndpoint {
-<a href=#105 id=105 data-nosnippet>105</a>    <span class="kw">pub </span>label: String,
+<a href=#104 id=104 data-nosnippet>104</a></span><span class="kw">pub struct </span>NameEndpoint {
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="kw">pub </span>name: String,
 <a href=#106 id=106 data-nosnippet>106</a>}
 </code></pre></div></section></main></body></html>
