@@ -324,7 +324,8 @@ impl Client {
     ///
     /// names can be any UTF-8 string, with a min length of 2 bytes, and
     /// maximum length of 128 bytes. **label uniqueness is not enforced.**
-    pub async fn set_name(&self, name: String) -> Result<(), Error> {
+    pub async fn set_name(&self, name: impl Into<String>) -> Result<(), Error> {
+        let name = name.into();
         set_name_inner(self.message_channel.clone(), name).await
     }
 
@@ -549,17 +550,16 @@ impl ClientActor {
             .map_err(|_| RemoteError::InternalServerError)
     }
 
-    async fn send_name_endpoint(&mut self, label: String) -> Result<(), RemoteError> {
+    async fn send_name_endpoint(&mut self, name: String) -> Result<(), RemoteError> {
         trace!("client sending name endpoint request");
         self.auth().await?;
 
         self.client
-            .rpc(NameEndpoint {
-                name: label.clone(),
-            })
+            .rpc(NameEndpoint { name: name.clone() })
             .await
             .inspect_err(|e| debug!("name endpoint error: {e}"))
             .map_err(|_| RemoteError::InternalServerError)??;
+        self.name = Some(name);
         Ok(())
     }
 
