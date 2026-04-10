@@ -235,7 +235,7 @@
 <a href=#235 id=235 data-nosnippet>235</a>            <span class="kw">let </span>tx = tx.clone();
 <a href=#236 id=236 data-nosnippet>236</a>            tokio::spawn(<span class="kw">async move </span>{
 <a href=#237 id=237 data-nosnippet>237</a>                <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = set_name_inner(tx, name).<span class="kw">await </span>{
-<a href=#238 id=238 data-nosnippet>238</a>                    <span class="macro">warn!</span>(err = %err, <span class="string">"setting endpoint label on startup"</span>);
+<a href=#238 id=238 data-nosnippet>238</a>                    <span class="macro">warn!</span>(err = %err, <span class="string">"setting endpoint name on startup"</span>);
 <a href=#239 id=239 data-nosnippet>239</a>                }
 <a href=#240 id=240 data-nosnippet>240</a>            });
 <a href=#241 id=241 data-nosnippet>241</a>        }
@@ -323,7 +323,7 @@
 <a href=#323 id=323 data-nosnippet>323</a>    <span class="doccomment">/// Name the active endpoint cloud-side.
 <a href=#324 id=324 data-nosnippet>324</a>    ///
 <a href=#325 id=325 data-nosnippet>325</a>    /// names can be any UTF-8 string, with a min length of 2 bytes, and
-<a href=#326 id=326 data-nosnippet>326</a>    /// maximum length of 128 bytes. **label uniqueness is not enforced.**
+<a href=#326 id=326 data-nosnippet>326</a>    /// maximum length of 128 bytes. **name uniqueness is not enforced.**
 <a href=#327 id=327 data-nosnippet>327</a>    </span><span class="kw">pub async fn </span>set_name(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw">impl </span>Into&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
 <a href=#328 id=328 data-nosnippet>328</a>        <span class="kw">let </span>name = name.into();
 <a href=#329 id=329 data-nosnippet>329</a>        set_name_inner(<span class="self">self</span>.message_channel.clone(), name).<span class="kw">await
@@ -486,13 +486,13 @@
 <a href=#486 id=486 data-nosnippet>486</a>                        }
 <a href=#487 id=487 data-nosnippet>487</a>                        ClientActorMessage::ReadName{ done } =&gt; {
 <a href=#488 id=488 data-nosnippet>488</a>                            <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = done.send(<span class="self">self</span>.name.clone()) {
-<a href=#489 id=489 data-nosnippet>489</a>                                <span class="macro">warn!</span>(<span class="string">"sending label value: {:#?}"</span>, err);
+<a href=#489 id=489 data-nosnippet>489</a>                                <span class="macro">warn!</span>(<span class="string">"sending name value: {:#?}"</span>, err);
 <a href=#490 id=490 data-nosnippet>490</a>                            }
 <a href=#491 id=491 data-nosnippet>491</a>                        }
 <a href=#492 id=492 data-nosnippet>492</a>                        ClientActorMessage::NameEndpoint{ name, done } =&gt; {
 <a href=#493 id=493 data-nosnippet>493</a>                            <span class="kw">let </span>res = <span class="self">self</span>.send_name_endpoint(name).<span class="kw">await</span>;
 <a href=#494 id=494 data-nosnippet>494</a>                            <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = done.send(res) {
-<a href=#495 id=495 data-nosnippet>495</a>                                <span class="macro">warn!</span>(<span class="string">"failed to label endpoint: {:#?}"</span>, err);
+<a href=#495 id=495 data-nosnippet>495</a>                                <span class="macro">warn!</span>(<span class="string">"failed to name endpoint: {:#?}"</span>, err);
 <a href=#496 id=496 data-nosnippet>496</a>                            }
 <a href=#497 id=497 data-nosnippet>497</a>                        }
 <a href=#498 id=498 data-nosnippet>498</a>                        <span class="attr">#[cfg(feature = <span class="string">"net_diagnostics"</span>)]
@@ -708,7 +708,7 @@
 <a href=#708 id=708 data-nosnippet>708</a>        <span class="macro">assert_eq!</span>(builder.name, <span class="prelude-val">Some</span>(<span class="string">"my-node 👋"</span>.to_string()));
 <a href=#709 id=709 data-nosnippet>709</a>
 <a href=#710 id=710 data-nosnippet>710</a>        <span class="kw">let </span><span class="prelude-val">Err</span>(err) = Client::builder(<span class="kw-2">&amp;</span>endpoint).name(<span class="string">"a"</span>) <span class="kw">else </span>{
-<a href=#711 id=711 data-nosnippet>711</a>            <span class="macro">panic!</span>(<span class="string">"label should fail for strings under 2 bytes"</span>);
+<a href=#711 id=711 data-nosnippet>711</a>            <span class="macro">panic!</span>(<span class="string">"name should fail for strings under 2 bytes"</span>);
 <a href=#712 id=712 data-nosnippet>712</a>        };
 <a href=#713 id=713 data-nosnippet>713</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
 <a href=#714 id=714 data-nosnippet>714</a>            err.downcast_ref::&lt;BuildError&gt;(),
@@ -717,7 +717,7 @@
 <a href=#717 id=717 data-nosnippet>717</a>
 <a href=#718 id=718 data-nosnippet>718</a>        <span class="kw">let </span>too_long_name = <span class="string">"👋"</span>.repeat(<span class="number">129</span>);
 <a href=#719 id=719 data-nosnippet>719</a>        <span class="kw">let </span><span class="prelude-val">Err</span>(err) = Client::builder(<span class="kw-2">&amp;</span>endpoint).name(<span class="kw-2">&amp;</span>too_long_name) <span class="kw">else </span>{
-<a href=#720 id=720 data-nosnippet>720</a>            <span class="macro">panic!</span>(<span class="string">"label should fail for strings over 128 bytes"</span>);
+<a href=#720 id=720 data-nosnippet>720</a>            <span class="macro">panic!</span>(<span class="string">"name should fail for strings over 128 bytes"</span>);
 <a href=#721 id=721 data-nosnippet>721</a>        };
 <a href=#722 id=722 data-nosnippet>722</a>        <span class="macro">assert!</span>(<span class="macro">matches!</span>(
 <a href=#723 id=723 data-nosnippet>723</a>            err.downcast_ref::&lt;BuildError&gt;(),
