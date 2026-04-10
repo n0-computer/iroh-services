@@ -235,7 +235,7 @@ impl ClientBuilder {
             let tx = tx.clone();
             tokio::spawn(async move {
                 if let Err(err) = set_name_inner(tx, name).await {
-                    warn!(err = %err, "setting endpoint label on startup");
+                    warn!(err = %err, "setting endpoint name on startup");
                 }
             });
         }
@@ -323,7 +323,7 @@ impl Client {
     /// Name the active endpoint cloud-side.
     ///
     /// names can be any UTF-8 string, with a min length of 2 bytes, and
-    /// maximum length of 128 bytes. **label uniqueness is not enforced.**
+    /// maximum length of 128 bytes. **name uniqueness is not enforced.**
     pub async fn set_name(&self, name: impl Into<String>) -> Result<(), Error> {
         let name = name.into();
         set_name_inner(self.message_channel.clone(), name).await
@@ -486,13 +486,13 @@ impl ClientActor {
                         }
                         ClientActorMessage::ReadName{ done } => {
                             if let Err(err) = done.send(self.name.clone()) {
-                                warn!("sending label value: {:#?}", err);
+                                warn!("sending name value: {:#?}", err);
                             }
                         }
                         ClientActorMessage::NameEndpoint{ name, done } => {
                             let res = self.send_name_endpoint(name).await;
                             if let Err(err) = done.send(res) {
-                                warn!("failed to label endpoint: {:#?}", err);
+                                warn!("failed to name endpoint: {:#?}", err);
                             }
                         }
                         #[cfg(feature = "net_diagnostics")]
@@ -708,7 +708,7 @@ mod tests {
         assert_eq!(builder.name, Some("my-node 👋".to_string()));
 
         let Err(err) = Client::builder(&endpoint).name("a") else {
-            panic!("label should fail for strings under 2 bytes");
+            panic!("name should fail for strings under 2 bytes");
         };
         assert!(matches!(
             err.downcast_ref::<BuildError>(),
@@ -717,7 +717,7 @@ mod tests {
 
         let too_long_name = "👋".repeat(129);
         let Err(err) = Client::builder(&endpoint).name(&too_long_name) else {
-            panic!("label should fail for strings over 128 bytes");
+            panic!("name should fail for strings over 128 bytes");
         };
         assert!(matches!(
             err.downcast_ref::<BuildError>(),
