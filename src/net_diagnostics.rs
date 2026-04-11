@@ -75,6 +75,7 @@ pub mod checks {
         let direct_addrs: Vec<SocketAddr> = addr.ip_addrs().copied().collect();
 
         // 4. Port mapping probe (the one thing NetReport doesn't include)
+        #[cfg(not(target_arch = "wasm32"))]
         let portmap_probe =
             match tokio::time::timeout(Duration::from_secs(5), probe_port_mapping()).await {
                 Ok(Ok(p)) => Some(p),
@@ -87,6 +88,8 @@ pub mod checks {
                     None
                 }
             };
+        #[cfg(target_arch = "wasm32")]
+        let portmap_probe = None;
 
         Ok(DiagnosticsReport {
             endpoint_id,
@@ -98,6 +101,7 @@ pub mod checks {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     async fn probe_port_mapping() -> Result<PortMapProbe> {
         let config = portmapper::Config {
             enable_upnp: true,
