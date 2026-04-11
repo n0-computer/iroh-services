@@ -291,7 +291,7 @@ impl<C: Capability + Ord> Capability for CapSet<C> {
 }
 
 /// Create an rcan token for the api access.
-#[cfg(feature = "ssh-key")]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn create_api_token_from_ssh_key(
     user_ssh_key: &ssh_key::PrivateKey,
     local_id: EndpointId,

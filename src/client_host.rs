@@ -83,22 +83,11 @@ impl ClientHost {
                     return send_missing_caps(tx, needed_caps).await;
                 }
 
-                #[cfg(not(feature = "net_diagnostics"))]
-                {
-                    tx.send(Err(RemoteError::AuthError(
-                        "this endpoint does not support running remote diagnostics".to_string(),
-                    )))
-                    .await?;
-                }
-
-                #[cfg(feature = "net_diagnostics")]
-                {
-                    let report =
-                        crate::net_diagnostics::checks::run_diagnostics(&self.endpoint).await?;
-                    tx.send(Ok(report))
-                        .await
-                        .inspect_err(|e| warn!("sending network diagnostics response: {:?}", e))?;
-                }
+                let report =
+                    crate::net_diagnostics::checks::run_diagnostics(&self.endpoint).await?;
+                tx.send(Ok(report))
+                    .await
+                    .inspect_err(|e| warn!("sending network diagnostics response: {:?}", e))?;
             }
         }
 
@@ -143,7 +132,6 @@ async fn send_missing_caps<T>(
 }
 
 #[cfg(test)]
-#[cfg(feature = "net_diagnostics")]
 mod tests {
     use iroh::{address_lookup::MemoryLookup, protocol::Router};
     use irpc_iroh::IrohLazyRemoteConnection;

@@ -14,14 +14,14 @@ use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
-#[cfg(feature = "net_diagnostics")]
-use crate::net_diagnostics::{DiagnosticsReport, checks::run_diagnostics};
-#[cfg(feature = "net_diagnostics")]
-use crate::protocol::PutNetworkDiagnostics;
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    protocol::{ALPN, Auth, IrohServicesClient, NameEndpoint, Ping, Pong, PutMetrics, RemoteError},
+    net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
+    protocol::{
+        ALPN, Auth, IrohServicesClient, NameEndpoint, Ping, Pong, PutMetrics,
+        PutNetworkDiagnostics, RemoteError,
+    },
 };
 
 /// Client is the main handle for interacting with iroh-services. It communicates with
@@ -163,7 +163,7 @@ impl ClientBuilder {
     }
 
     /// Loads the private ssh key from the given path, and creates the needed capability.
-    #[cfg(feature = "ssh-key")]
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn ssh_key_from_file<P: AsRef<std::path::Path>>(self, path: P) -> Result<Self> {
         let file_content = tokio::fs::read_to_string(path).await?;
         let private_key = ssh_key::PrivateKey::from_openssh(&file_content)?;
@@ -172,7 +172,7 @@ impl ClientBuilder {
     }
 
     /// Creates the capability from the provided private ssh key.
-    #[cfg(feature = "ssh-key")]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn ssh_key(mut self, key: &ssh_key::PrivateKey) -> Result<Self> {
         let local_id = self.endpoint.id();
         let rcan = crate::caps::create_api_token_from_ssh_key(
@@ -359,7 +359,6 @@ impl Client {
     /// Grant capabilities to a remote endpoint. Creates a signed RCAN token
     /// and sends it to iroh-services for storage. The remote can then use this token
     /// when dialing back to authorize its requests.
-    #[cfg(feature = "client_host")]
     pub async fn grant_capability(
         &self,
         remote_id: EndpointId,
@@ -387,7 +386,6 @@ impl Client {
     }
 
     /// run local network status diagnostics, optionally uploading the results
-    #[cfg(feature = "net_diagnostics")]
     pub async fn net_diagnostics(&self, send: bool) -> Result<DiagnosticsReport, Error> {
         let report = run_diagnostics(&self.endpoint).await?;
         if send {
@@ -423,7 +421,6 @@ enum ClientActorMessage {
         cap: Box<Rcan<Caps>>,
         done: oneshot::Sender<Result<(), Error>>,
     },
-    #[cfg(feature = "net_diagnostics")]
     PutNetworkDiagnostics {
         report: Box<DiagnosticsReport>,
         done: oneshot::Sender<Result<(), Error>>,
@@ -502,7 +499,6 @@ impl ClientActor {
                                 warn!("failed to name endpoint: {:#?}", err);
                             }
                         }
-                        #[cfg(feature = "net_diagnostics")]
                         ClientActorMessage::PutNetworkDiagnostics{ report, done } => {
                             let res = self.put_network_diagnostics(*report).await;
                             if let Err(err) = done.send(res) {
@@ -601,7 +597,6 @@ impl ClientActor {
         Ok(())
     }
 
-    #[cfg(feature = "net_diagnostics")]
     async fn put_network_diagnostics(
         &mut self,
         report: crate::net_diagnostics::DiagnosticsReport,
