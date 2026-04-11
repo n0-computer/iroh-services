@@ -126,12 +126,7 @@ impl ClientBuilder {
     /// will not produce an error
     pub fn name(mut self, name: impl Into<String>) -> Result<Self> {
         let name = name.into();
-        if name.len() < CLIENT_NAME_MIN_LENGTH {
-            return Err(BuildError::InvalidName(ValidateNameError::TooShort).into());
-        } else if name.len() > CLIENT_NAME_MAX_LENGTH {
-            return Err(BuildError::InvalidName(ValidateNameError::TooLong).into());
-        }
-
+        validate_name(&name).map_err(BuildError::InvalidName)?;
         self.name = Some(name);
         Ok(self)
     }
@@ -286,8 +281,20 @@ pub enum ValidateNameError {
     TooShort,
 }
 
+fn validate_name(name: &str) -> Result<(), ValidateNameError> {
+    if name.len() < CLIENT_NAME_MIN_LENGTH {
+        Err(ValidateNameError::TooShort)
+    } else if name.len() > CLIENT_NAME_MAX_LENGTH {
+        Err(ValidateNameError::TooLong)
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Invalid endpoint name: {0}")]
+    InvalidName(#[from] ValidateNameError),
     #[error("Remote error: {0}")]
     Remote(#[from] RemoteError),
     #[error("Connection error: {0}")]
@@ -318,8 +325,7 @@ impl Client {
     /// names can be any UTF-8 string, with a min length of 2 bytes, and
     /// maximum length of 128 bytes. **name uniqueness is not enforced.**
     pub async fn set_name(&self, name: impl Into<String>) -> Result<(), Error> {
-        let name = name.into();
-        set_name_inner(self.message_channel.clone(), name).await
+        set_name_inner(self.message_channel.clone(), name.into()).await
     }
 
     /// Pings the remote node.
@@ -618,6 +624,7 @@ async fn set_name_inner(
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
     name: String,
 ) -> Result<(), Error> {
+    validate_name(&name)?;
     debug!(name_len = name.len(), "calling set name");
     let (tx, rx) = oneshot::channel();
     message_channel
