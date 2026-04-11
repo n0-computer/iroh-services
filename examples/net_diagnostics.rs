@@ -8,7 +8,7 @@
 //! The ClientHost registers on the [CLIENT_HOST_ALPN], so that the remote
 //! iroh-services service can dial back into this endpoint to request diagnostics.
 //!
-//! Run with: cargo run --features=net_diagnostics,client_host --example net_diagnostics
+//! Run with: cargo run --example net_diagnostics
 use anyhow::Result;
 use iroh::{Endpoint, endpoint::presets, protocol::Router};
 use iroh_services::{

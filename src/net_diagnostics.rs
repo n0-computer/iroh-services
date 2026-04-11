@@ -32,7 +32,6 @@ pub struct PortMapProbe {
     pub nat_pmp: bool,
 }
 
-#[cfg(feature = "net_diagnostics")]
 pub mod checks {
     use std::{net::SocketAddr, time::Duration};
 
@@ -118,7 +117,6 @@ pub mod checks {
 }
 
 #[cfg(test)]
-#[cfg(feature = "net_diagnostics")]
 mod tests {
     use crate::run_diagnostics;
 
