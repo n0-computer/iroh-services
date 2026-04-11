@@ -75,56 +75,60 @@
 <a href=#75 id=75 data-nosnippet>75</a>        <span class="kw">let </span>direct_addrs: Vec&lt;SocketAddr&gt; = addr.ip_addrs().copied().collect();
 <a href=#76 id=76 data-nosnippet>76</a>
 <a href=#77 id=77 data-nosnippet>77</a>        <span class="comment">// 4. Port mapping probe (the one thing NetReport doesn't include)
-<a href=#78 id=78 data-nosnippet>78</a>        </span><span class="kw">let </span>portmap_probe =
-<a href=#79 id=79 data-nosnippet>79</a>            <span class="kw">match </span>tokio::time::timeout(Duration::from_secs(<span class="number">5</span>), probe_port_mapping()).<span class="kw">await </span>{
-<a href=#80 id=80 data-nosnippet>80</a>                <span class="prelude-val">Ok</span>(<span class="prelude-val">Ok</span>(p)) =&gt; <span class="prelude-val">Some</span>(p),
-<a href=#81 id=81 data-nosnippet>81</a>                <span class="prelude-val">Ok</span>(<span class="prelude-val">Err</span>(e)) =&gt; {
-<a href=#82 id=82 data-nosnippet>82</a>                    <span class="macro">tracing::warn!</span>(<span class="string">"portmap probe failed: {e}"</span>);
-<a href=#83 id=83 data-nosnippet>83</a>                    <span class="prelude-val">None
-<a href=#84 id=84 data-nosnippet>84</a>                </span>}
-<a href=#85 id=85 data-nosnippet>85</a>                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; {
-<a href=#86 id=86 data-nosnippet>86</a>                    <span class="macro">tracing::warn!</span>(<span class="string">"portmap probe timed out"</span>);
-<a href=#87 id=87 data-nosnippet>87</a>                    <span class="prelude-val">None
-<a href=#88 id=88 data-nosnippet>88</a>                </span>}
-<a href=#89 id=89 data-nosnippet>89</a>            };
-<a href=#90 id=90 data-nosnippet>90</a>
-<a href=#91 id=91 data-nosnippet>91</a>        <span class="prelude-val">Ok</span>(DiagnosticsReport {
-<a href=#92 id=92 data-nosnippet>92</a>            endpoint_id,
-<a href=#93 id=93 data-nosnippet>93</a>            net_report,
-<a href=#94 id=94 data-nosnippet>94</a>            direct_addrs,
-<a href=#95 id=95 data-nosnippet>95</a>            portmap_probe,
-<a href=#96 id=96 data-nosnippet>96</a>            iroh_version: <span class="kw">crate</span>::IROH_VERSION.to_string(),
-<a href=#97 id=97 data-nosnippet>97</a>            iroh_services_version: <span class="kw">crate</span>::IROH_SERVICES_VERSION.to_string(),
-<a href=#98 id=98 data-nosnippet>98</a>        })
-<a href=#99 id=99 data-nosnippet>99</a>    }
-<a href=#100 id=100 data-nosnippet>100</a>
-<a href=#101 id=101 data-nosnippet>101</a>    <span class="kw">async fn </span>probe_port_mapping() -&gt; <span class="prelude-ty">Result</span>&lt;PortMapProbe&gt; {
-<a href=#102 id=102 data-nosnippet>102</a>        <span class="kw">let </span>config = portmapper::Config {
-<a href=#103 id=103 data-nosnippet>103</a>            enable_upnp: <span class="bool-val">true</span>,
-<a href=#104 id=104 data-nosnippet>104</a>            enable_pcp: <span class="bool-val">true</span>,
-<a href=#105 id=105 data-nosnippet>105</a>            enable_nat_pmp: <span class="bool-val">true</span>,
-<a href=#106 id=106 data-nosnippet>106</a>            protocol: portmapper::Protocol::Udp,
-<a href=#107 id=107 data-nosnippet>107</a>        };
-<a href=#108 id=108 data-nosnippet>108</a>        <span class="kw">let </span>client = portmapper::Client::new(config);
-<a href=#109 id=109 data-nosnippet>109</a>        <span class="kw">let </span>probe_rx = client.probe();
-<a href=#110 id=110 data-nosnippet>110</a>        <span class="kw">let </span>probe = probe_rx.<span class="kw">await</span><span class="question-mark">?</span>.map_err(|e| <span class="macro">anyhow::anyhow!</span>(e))<span class="question-mark">?</span>;
-<a href=#111 id=111 data-nosnippet>111</a>        <span class="prelude-val">Ok</span>(PortMapProbe {
-<a href=#112 id=112 data-nosnippet>112</a>            upnp: probe.upnp,
-<a href=#113 id=113 data-nosnippet>113</a>            pcp: probe.pcp,
-<a href=#114 id=114 data-nosnippet>114</a>            nat_pmp: probe.nat_pmp,
-<a href=#115 id=115 data-nosnippet>115</a>        })
-<a href=#116 id=116 data-nosnippet>116</a>    }
-<a href=#117 id=117 data-nosnippet>117</a>}
-<a href=#118 id=118 data-nosnippet>118</a>
-<a href=#119 id=119 data-nosnippet>119</a><span class="attr">#[cfg(test)]
-<a href=#120 id=120 data-nosnippet>120</a></span><span class="kw">mod </span>tests {
-<a href=#121 id=121 data-nosnippet>121</a>    <span class="kw">use </span><span class="kw">crate</span>::run_diagnostics;
+<a href=#78 id=78 data-nosnippet>78</a>        </span><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#79 id=79 data-nosnippet>79</a>        </span><span class="kw">let </span>portmap_probe =
+<a href=#80 id=80 data-nosnippet>80</a>            <span class="kw">match </span>tokio::time::timeout(Duration::from_secs(<span class="number">5</span>), probe_port_mapping()).<span class="kw">await </span>{
+<a href=#81 id=81 data-nosnippet>81</a>                <span class="prelude-val">Ok</span>(<span class="prelude-val">Ok</span>(p)) =&gt; <span class="prelude-val">Some</span>(p),
+<a href=#82 id=82 data-nosnippet>82</a>                <span class="prelude-val">Ok</span>(<span class="prelude-val">Err</span>(e)) =&gt; {
+<a href=#83 id=83 data-nosnippet>83</a>                    <span class="macro">tracing::warn!</span>(<span class="string">"portmap probe failed: {e}"</span>);
+<a href=#84 id=84 data-nosnippet>84</a>                    <span class="prelude-val">None
+<a href=#85 id=85 data-nosnippet>85</a>                </span>}
+<a href=#86 id=86 data-nosnippet>86</a>                <span class="prelude-val">Err</span>(<span class="kw">_</span>) =&gt; {
+<a href=#87 id=87 data-nosnippet>87</a>                    <span class="macro">tracing::warn!</span>(<span class="string">"portmap probe timed out"</span>);
+<a href=#88 id=88 data-nosnippet>88</a>                    <span class="prelude-val">None
+<a href=#89 id=89 data-nosnippet>89</a>                </span>}
+<a href=#90 id=90 data-nosnippet>90</a>            };
+<a href=#91 id=91 data-nosnippet>91</a>        <span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
+<a href=#92 id=92 data-nosnippet>92</a>        </span><span class="kw">let </span>portmap_probe = <span class="prelude-val">None</span>;
+<a href=#93 id=93 data-nosnippet>93</a>
+<a href=#94 id=94 data-nosnippet>94</a>        <span class="prelude-val">Ok</span>(DiagnosticsReport {
+<a href=#95 id=95 data-nosnippet>95</a>            endpoint_id,
+<a href=#96 id=96 data-nosnippet>96</a>            net_report,
+<a href=#97 id=97 data-nosnippet>97</a>            direct_addrs,
+<a href=#98 id=98 data-nosnippet>98</a>            portmap_probe,
+<a href=#99 id=99 data-nosnippet>99</a>            iroh_version: <span class="kw">crate</span>::IROH_VERSION.to_string(),
+<a href=#100 id=100 data-nosnippet>100</a>            iroh_services_version: <span class="kw">crate</span>::IROH_SERVICES_VERSION.to_string(),
+<a href=#101 id=101 data-nosnippet>101</a>        })
+<a href=#102 id=102 data-nosnippet>102</a>    }
+<a href=#103 id=103 data-nosnippet>103</a>
+<a href=#104 id=104 data-nosnippet>104</a>    <span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">async fn </span>probe_port_mapping() -&gt; <span class="prelude-ty">Result</span>&lt;PortMapProbe&gt; {
+<a href=#106 id=106 data-nosnippet>106</a>        <span class="kw">let </span>config = portmapper::Config {
+<a href=#107 id=107 data-nosnippet>107</a>            enable_upnp: <span class="bool-val">true</span>,
+<a href=#108 id=108 data-nosnippet>108</a>            enable_pcp: <span class="bool-val">true</span>,
+<a href=#109 id=109 data-nosnippet>109</a>            enable_nat_pmp: <span class="bool-val">true</span>,
+<a href=#110 id=110 data-nosnippet>110</a>            protocol: portmapper::Protocol::Udp,
+<a href=#111 id=111 data-nosnippet>111</a>        };
+<a href=#112 id=112 data-nosnippet>112</a>        <span class="kw">let </span>client = portmapper::Client::new(config);
+<a href=#113 id=113 data-nosnippet>113</a>        <span class="kw">let </span>probe_rx = client.probe();
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>probe = probe_rx.<span class="kw">await</span><span class="question-mark">?</span>.map_err(|e| <span class="macro">anyhow::anyhow!</span>(e))<span class="question-mark">?</span>;
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="prelude-val">Ok</span>(PortMapProbe {
+<a href=#116 id=116 data-nosnippet>116</a>            upnp: probe.upnp,
+<a href=#117 id=117 data-nosnippet>117</a>            pcp: probe.pcp,
+<a href=#118 id=118 data-nosnippet>118</a>            nat_pmp: probe.nat_pmp,
+<a href=#119 id=119 data-nosnippet>119</a>        })
+<a href=#120 id=120 data-nosnippet>120</a>    }
+<a href=#121 id=121 data-nosnippet>121</a>}
 <a href=#122 id=122 data-nosnippet>122</a>
-<a href=#123 id=123 data-nosnippet>123</a>    <span class="attr">#[tokio::test]
-<a href=#124 id=124 data-nosnippet>124</a>    </span><span class="kw">async fn </span>test_run_diagnostics() {
-<a href=#125 id=125 data-nosnippet>125</a>        <span class="kw">let </span>endpoint = iroh::Endpoint::empty_builder().bind().<span class="kw">await</span>.unwrap();
-<a href=#126 id=126 data-nosnippet>126</a>        run_diagnostics(<span class="kw-2">&amp;</span>endpoint).<span class="kw">await</span>.unwrap();
-<a href=#127 id=127 data-nosnippet>127</a>        endpoint.close().<span class="kw">await</span>;
-<a href=#128 id=128 data-nosnippet>128</a>    }
-<a href=#129 id=129 data-nosnippet>129</a>}
+<a href=#123 id=123 data-nosnippet>123</a><span class="attr">#[cfg(test)]
+<a href=#124 id=124 data-nosnippet>124</a></span><span class="kw">mod </span>tests {
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="kw">use </span><span class="kw">crate</span>::run_diagnostics;
+<a href=#126 id=126 data-nosnippet>126</a>
+<a href=#127 id=127 data-nosnippet>127</a>    <span class="attr">#[tokio::test]
+<a href=#128 id=128 data-nosnippet>128</a>    </span><span class="kw">async fn </span>test_run_diagnostics() {
+<a href=#129 id=129 data-nosnippet>129</a>        <span class="kw">let </span>endpoint = iroh::Endpoint::empty_builder().bind().<span class="kw">await</span>.unwrap();
+<a href=#130 id=130 data-nosnippet>130</a>        run_diagnostics(<span class="kw-2">&amp;</span>endpoint).<span class="kw">await</span>.unwrap();
+<a href=#131 id=131 data-nosnippet>131</a>        endpoint.close().<span class="kw">await</span>;
+<a href=#132 id=132 data-nosnippet>132</a>    }
+<a href=#133 id=133 data-nosnippet>133</a>}
 </code></pre></div></section></main></body></html>
