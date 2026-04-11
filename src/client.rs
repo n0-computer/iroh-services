@@ -227,18 +227,8 @@ impl ClientBuilder {
                 session_id: Uuid::new_v4(),
                 authorized: false,
             }
-            .run(self.registry, self.metrics_interval, rx),
+            .run(self.name, self.registry, self.metrics_interval, rx),
         ));
-
-        if let Some(name) = &self.name {
-            let name = name.clone();
-            let tx = tx.clone();
-            tokio::spawn(async move {
-                if let Err(err) = set_name_inner(tx, name).await {
-                    warn!(err = %err, "setting endpoint name on startup");
-                }
-            });
-        }
 
         Ok(Client {
             endpoint: self.endpoint,
@@ -282,9 +272,12 @@ impl From<irpc::Error> for BuildError {
     }
 }
 
+/// Minimum length in bytes for an endpoint name.
 pub const CLIENT_NAME_MIN_LENGTH: usize = 2;
+/// Maximum length in bytes for an endpoint name.
 pub const CLIENT_NAME_MAX_LENGTH: usize = 128;
 
+/// Error returned when an endpoint name fails validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ValidateNameError {
     #[error("Name is too long (must be no more than {CLIENT_NAME_MAX_LENGTH} characters).")]
@@ -449,6 +442,7 @@ struct ClientActor {
 impl ClientActor {
     async fn run(
         mut self,
+        initial_name: Option<String>,
         registry: Registry,
         interval: Option<Duration>,
         mut inbox: tokio::sync::mpsc::Receiver<ClientActorMessage>,
@@ -457,6 +451,13 @@ impl ClientActor {
         let mut encoder = Encoder::new(registry);
         let mut metrics_timer = interval.map(|interval| n0_future::time::interval(interval));
         trace!("starting client actor");
+
+        if let Some(name) = initial_name {
+            if let Err(err) = self.send_name_endpoint(name).await {
+                warn!(err = %err, "failed setting endpoint name on startup");
+            }
+        }
+
         loop {
             trace!("client actor tick");
             tokio::select! {
@@ -643,8 +644,9 @@ mod tests {
     #[tokio::test]
     #[temp_env_vars]
     async fn test_api_key_from_env() {
+        use rand::SeedableRng;
         // construct
-        let mut rng = rand::rng();
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(0);
         let shared_secret = SecretKey::generate(&mut rng);
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
         let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
@@ -671,7 +673,8 @@ mod tests {
     /// panicking. Metrics sending itself is expected to fail.
     #[tokio::test]
     async fn test_no_metrics_interval() {
-        let mut rng = rand::rng();
+        use rand::SeedableRng;
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
         let shared_secret = SecretKey::generate(&mut rng);
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
         let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
@@ -692,7 +695,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_name() {
-        let mut rng = rand::rng();
+        use rand::SeedableRng;
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(0);
         let shared_secret = SecretKey::generate(&mut rng);
         let fake_endpoint_id = SecretKey::generate(&mut rng).public();
         let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);

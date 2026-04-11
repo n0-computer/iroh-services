@@ -50,6 +50,7 @@ getrandom = { version = "0.3.2", features = ["wasm_js"] }
 built = { version = "0.7", features = ["cargo-lock"] }
 
 [dev-dependencies]
+rand_chacha = "0.9"
 temp_env_vars = "0.2.1"
 tokio = { version = "1.45", features = ["macros", "rt", "rt-multi-thread"] }
 
