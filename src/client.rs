@@ -452,10 +452,10 @@ impl ClientActor {
         let mut metrics_timer = interval.map(|interval| n0_future::time::interval(interval));
         trace!("starting client actor");
 
-        if let Some(name) = initial_name {
-            if let Err(err) = self.send_name_endpoint(name).await {
-                warn!(err = %err, "failed setting endpoint name on startup");
-            }
+        if let Some(name) = initial_name
+            && let Err(err) = self.send_name_endpoint(name).await
+        {
+            warn!(err = %err, "failed setting endpoint name on startup");
         }
 
         loop {
