@@ -122,11 +122,16 @@ pub mod checks {
 
 #[cfg(test)]
 mod tests {
+    use iroh::endpoint::presets;
+
     use crate::run_diagnostics;
 
     #[tokio::test]
     async fn test_run_diagnostics() {
-        let endpoint = iroh::Endpoint::empty_builder().bind().await.unwrap();
+        let endpoint = iroh::Endpoint::builder(presets::Minimal)
+            .bind()
+            .await
+            .unwrap();
         run_diagnostics(&endpoint).await.unwrap();
         endpoint.close().await;
     }

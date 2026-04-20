@@ -633,7 +633,8 @@ async fn set_name_inner(
 
 #[cfg(test)]
 mod tests {
-    use iroh::{Endpoint, EndpointAddr, SecretKey};
+    use iroh::{Endpoint, EndpointAddr, SecretKey, endpoint::presets};
+    use rand::{RngExt, SeedableRng};
     use temp_env_vars::temp_env_vars;
 
     use crate::{
@@ -646,17 +647,16 @@ mod tests {
     #[tokio::test]
     #[temp_env_vars]
     async fn test_api_key_from_env() {
-        use rand::SeedableRng;
         // construct
-        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(0);
-        let shared_secret = SecretKey::generate(&mut rng);
-        let fake_endpoint_id = SecretKey::generate(&mut rng).public();
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(0);
+        let shared_secret = SecretKey::from_bytes(&rng.random());
+        let fake_endpoint_id = SecretKey::from_bytes(&rng.random()).public();
         let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
         unsafe {
             std::env::set_var(API_SECRET_ENV_VAR_NAME, api_secret.to_string());
         };
 
-        let endpoint = Endpoint::empty_builder().bind().await.unwrap();
+        let endpoint = Endpoint::builder(presets::Minimal).bind().await.unwrap();
 
         let builder = Client::builder(&endpoint).api_secret_from_env().unwrap();
 
@@ -675,13 +675,12 @@ mod tests {
     /// panicking. Metrics sending itself is expected to fail.
     #[tokio::test]
     async fn test_no_metrics_interval() {
-        use rand::SeedableRng;
-        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1);
-        let shared_secret = SecretKey::generate(&mut rng);
-        let fake_endpoint_id = SecretKey::generate(&mut rng).public();
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(1);
+        let shared_secret = SecretKey::from_bytes(&rng.random());
+        let fake_endpoint_id = SecretKey::from_bytes(&rng.random()).public();
         let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
 
-        let endpoint = Endpoint::empty_builder().bind().await.unwrap();
+        let endpoint = Endpoint::builder(presets::Minimal).bind().await.unwrap();
 
         let client = Client::builder(&endpoint)
             .disable_metrics_interval()
@@ -697,13 +696,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_name() {
-        use rand::SeedableRng;
-        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(0);
-        let shared_secret = SecretKey::generate(&mut rng);
-        let fake_endpoint_id = SecretKey::generate(&mut rng).public();
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(0);
+        let shared_secret = SecretKey::from_bytes(&rng.random());
+        let fake_endpoint_id = SecretKey::from_bytes(&rng.random()).public();
         let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
 
-        let endpoint = Endpoint::empty_builder().bind().await.unwrap();
+        let endpoint = Endpoint::builder(presets::Minimal).bind().await.unwrap();
 
         let builder = Client::builder(&endpoint)
             .name("my-node 👋")
