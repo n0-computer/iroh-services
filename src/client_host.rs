@@ -133,7 +133,7 @@ async fn send_missing_caps<T>(
 
 #[cfg(test)]
 mod tests {
-    use iroh::{address_lookup::MemoryLookup, protocol::Router};
+    use iroh::{address_lookup::MemoryLookup, endpoint::presets, protocol::Router};
     use irpc_iroh::IrohLazyRemoteConnection;
     use n0_future::time::Duration;
 
@@ -147,13 +147,13 @@ mod tests {
     #[tokio::test]
     async fn test_diagnostics_host_run_diagnostics() {
         let lookup = MemoryLookup::new();
-        let server_ep = iroh::Endpoint::empty_builder()
+        let server_ep = iroh::Endpoint::builder(presets::Minimal)
             .address_lookup(lookup.clone())
             .bind()
             .await
             .unwrap();
 
-        let client_ep = iroh::Endpoint::empty_builder()
+        let client_ep = iroh::Endpoint::builder(presets::Minimal)
             .address_lookup(lookup.clone())
             .bind()
             .await
@@ -196,13 +196,13 @@ mod tests {
     #[tokio::test]
     async fn test_client_host_rejects_self_signed_rcan() {
         let lookup = MemoryLookup::new();
-        let server_ep = iroh::Endpoint::empty_builder()
+        let server_ep = iroh::Endpoint::builder(presets::Minimal)
             .address_lookup(lookup.clone())
             .bind()
             .await
             .unwrap();
 
-        let client_ep = iroh::Endpoint::empty_builder()
+        let client_ep = iroh::Endpoint::builder(presets::Minimal)
             .address_lookup(lookup.clone())
             .bind()
             .await
