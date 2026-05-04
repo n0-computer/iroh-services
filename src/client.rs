@@ -15,8 +15,8 @@ use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 use crate::{
-    api_secret::ApiSecret,
-    caps::Caps,
+    api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
+    caps::{Caps, DEFAULT_CAP_EXPIRY},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
     protocol::{
         ALPN, Auth, IrohServicesClient, NameEndpoint, Ping, Pong, PutMetrics,
@@ -68,9 +68,6 @@ pub struct ClientBuilder {
     remote: Option<EndpointAddr>,
     registry: Registry,
 }
-
-const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
-pub const API_SECRET_ENV_VAR_NAME: &str = "IROH_SERVICES_API_SECRET";
 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
