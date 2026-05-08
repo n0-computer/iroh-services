@@ -290,22 +290,17 @@ impl<C: Capability + Ord> Capability for CapSet<C> {
     }
 }
 
-/// Create an rcan token for the api access.
+/// Create an rcan token for the api access from a PEM-encoded OpenSSH ed25519
+/// private key.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn create_api_token_from_ssh_key(
-    user_ssh_key: &ssh_key::PrivateKey,
+pub fn create_api_token_from_openssh_pem(
+    pem: &str,
     local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
 ) -> Result<Rcan<Caps>> {
-    let issuer: ed25519_dalek::SigningKey = user_ssh_key
-        .key_data()
-        .ed25519()
-        .context("only Ed25519 keys supported")?
-        .private
-        .clone()
-        .into();
-
+    let seed = crate::openssh::parse_ed25519_private_key(pem)?;
+    let issuer = ed25519_dalek::SigningKey::from_bytes(&seed);
     let audience = local_id.as_verifying_key();
     let can =
         Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));

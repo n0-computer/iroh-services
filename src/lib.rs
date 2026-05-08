@@ -30,6 +30,8 @@
 
 mod client;
 mod client_host;
+#[cfg(not(target_arch = "wasm32"))]
+mod openssh;
 
 pub mod api_secret;
 pub mod caps;
