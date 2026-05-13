@@ -81,6 +81,8 @@ pub enum Cap {
     Metrics(MetricsCap),
     #[strum(to_string = "net-diagnostics:{0}")]
     NetDiagnostics(NetDiagnosticsCap),
+    #[strum(to_string = "logs:{0}")]
+    Logs(LogsCap),
 }
 
 impl FromStr for Cap {
@@ -94,6 +96,7 @@ impl FromStr for Cap {
                 "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
                 "relay" => Self::Relay(RelayCap::from_str(inner)?),
                 "net-diagnostics" => Self::NetDiagnostics(NetDiagnosticsCap::from_str(inner)?),
+                "logs" => Self::Logs(LogsCap::from_str(inner)?),
                 _ => bail!("invalid cap domain"),
             })
         } else {
@@ -118,6 +121,16 @@ cap_enum!(
     pub enum NetDiagnosticsCap {
         PutAny,
         GetAny,
+    }
+);
+
+cap_enum!(
+    /// Capabilities for the log collection feature.
+    pub enum LogsCap {
+        /// Permits the bearer to push log lines to the cloud.
+        Push,
+        /// Permits the bearer to set the log level filter on the issuer at runtime.
+        SetLevel,
     }
 );
 
@@ -179,6 +192,7 @@ impl Capability for Cap {
             (Cap::Relay(slf), Cap::Relay(other)) => slf.permits(other),
             (Cap::Metrics(slf), Cap::Metrics(other)) => slf.permits(other),
             (Cap::NetDiagnostics(slf), Cap::NetDiagnostics(other)) => slf.permits(other),
+            (Cap::Logs(slf), Cap::Logs(other)) => slf.permits(other),
             (_, _) => false,
         }
     }
@@ -192,6 +206,8 @@ fn client_capabilities(other: &Cap) -> bool {
         Cap::Metrics(MetricsCap::PutAny) => true,
         Cap::NetDiagnostics(NetDiagnosticsCap::PutAny) => true,
         Cap::NetDiagnostics(NetDiagnosticsCap::GetAny) => true,
+        Cap::Logs(LogsCap::Push) => true,
+        Cap::Logs(LogsCap::SetLevel) => true,
     }
 }
 
@@ -216,6 +232,16 @@ impl Capability for NetDiagnosticsCap {
         match (self, other) {
             (NetDiagnosticsCap::PutAny, NetDiagnosticsCap::PutAny) => true,
             (NetDiagnosticsCap::GetAny, NetDiagnosticsCap::GetAny) => true,
+            (_, _) => false,
+        }
+    }
+}
+
+impl Capability for LogsCap {
+    fn permits(&self, other: &Self) -> bool {
+        match (self, other) {
+            (LogsCap::Push, LogsCap::Push) => true,
+            (LogsCap::SetLevel, LogsCap::SetLevel) => true,
             (_, _) => false,
         }
     }
