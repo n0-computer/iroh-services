@@ -46,6 +46,7 @@
 
 use std::{
     collections::VecDeque,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -381,6 +382,145 @@ impl tracing::field::Visit for FieldVisitor {
     }
 }
 
+/// How often the rolling file appender starts a new file.
+///
+/// Re-exported from `tracing-appender` so callers don't need to depend on it
+/// directly.
+pub use tracing_appender::rolling::Rotation;
+
+/// Guard returned by [`file_layer`] that keeps the non-blocking writer's
+/// worker thread alive. Drop this only at process shutdown; once dropped,
+/// any buffered records still in flight are flushed and the file layer
+/// stops accepting writes.
+pub use tracing_appender::non_blocking::WorkerGuard;
+
+/// Errors raised when constructing the file logger.
+#[derive(Debug, thiserror::Error)]
+pub enum FileLoggerError {
+    /// Could not create the log directory or open the rolling appender.
+    #[error("file logger setup failed: {0}")]
+    Io(#[from] std::io::Error),
+    /// `tracing-appender`'s builder rejected the configuration (for example
+    /// an invalid filename prefix).
+    #[error("file logger builder rejected configuration: {0}")]
+    Builder(String),
+}
+
+/// Configuration for the rolling file logger.
+///
+/// Use [`FileLoggerConfig::new`] to set the destination directory and tune
+/// the remaining fields with the with-style setters. The defaults are
+/// daily rotation, a `iroh-services` filename prefix, and a 30-file
+/// retention window.
+#[derive(Debug, Clone)]
+pub struct FileLoggerConfig {
+    dir: PathBuf,
+    rotation: Rotation,
+    file_name_prefix: String,
+    max_files: Option<usize>,
+}
+
+impl FileLoggerConfig {
+    /// Build a config rooted at `dir`. The directory is created on first
+    /// write if it does not exist.
+    pub fn new<P: Into<PathBuf>>(dir: P) -> Self {
+        Self {
+            dir: dir.into(),
+            rotation: Rotation::DAILY,
+            file_name_prefix: "iroh-services".into(),
+            max_files: Some(30),
+        }
+    }
+
+    /// Override the rotation cadence. Default: [`Rotation::DAILY`].
+    pub fn with_rotation(mut self, rotation: Rotation) -> Self {
+        self.rotation = rotation;
+        self
+    }
+
+    /// Override the file name stem. Rotation appends a date suffix to this.
+    /// Default: `iroh-services`.
+    pub fn with_file_name_prefix<S: Into<String>>(mut self, prefix: S) -> Self {
+        self.file_name_prefix = prefix.into();
+        self
+    }
+
+    /// Override the retention cap. `None` keeps every file forever; `Some(n)`
+    /// keeps at most `n` files and deletes the oldest on rotation. Default:
+    /// `Some(30)`.
+    pub fn with_max_files(mut self, max_files: Option<usize>) -> Self {
+        self.max_files = max_files;
+        self
+    }
+}
+
+/// Builds a tracing layer that writes records to a rolling file under
+/// `config.dir`. Returns the layer plus a [`WorkerGuard`] the caller must
+/// hold for the lifetime of the process — drop it at shutdown so any
+/// buffered records flush before exit.
+///
+/// The layer is not filtered. Compose it with the rest of your subscriber
+/// to control what reaches the file. A common pattern is to use the same
+/// [`EnvFilter`] reload handle as the cloud-controlled buffer layer, so a
+/// dashboard-pushed `SetLogLevel` adjusts file output too.
+///
+/// # Example
+///
+/// ```no_run
+/// use iroh_services::logs::{FileLoggerConfig, Rotation};
+/// use tracing_subscriber::prelude::*;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// let (file_layer, _guard) = iroh_services::logs::file_layer(
+///     FileLoggerConfig::new("./logs")
+///         .with_rotation(Rotation::HOURLY)
+///         .with_max_files(Some(24)),
+/// )?;
+///
+/// tracing_subscriber::registry()
+///     .with(file_layer)
+///     .init();
+/// # // Keep `_guard` alive for the program lifetime.
+/// # Ok(())
+/// # }
+/// ```
+pub fn file_layer<S>(
+    config: FileLoggerConfig,
+) -> Result<(impl Layer<S> + Send + Sync + 'static, WorkerGuard), FileLoggerError>
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    let FileLoggerConfig {
+        dir,
+        rotation,
+        file_name_prefix,
+        max_files,
+    } = config;
+
+    create_dir_all(&dir)?;
+
+    let mut builder = tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(rotation)
+        .filename_prefix(file_name_prefix);
+    if let Some(max) = max_files {
+        builder = builder.max_log_files(max);
+    }
+    let appender = builder
+        .build(&dir)
+        .map_err(|e| FileLoggerError::Builder(e.to_string()))?;
+
+    let (writer, guard) = tracing_appender::non_blocking(appender);
+    let layer = tracing_subscriber::fmt::layer()
+        .with_writer(writer)
+        .with_ansi(false)
+        .json();
+    Ok((layer, guard))
+}
+
+fn create_dir_all(dir: &Path) -> Result<(), FileLoggerError> {
+    std::fs::create_dir_all(dir).map_err(FileLoggerError::Io)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,5 +608,45 @@ mod tests {
                 .iter()
                 .any(|l| message_is(l, "should not appear after revert"))
         );
+    }
+
+    /// `file_layer` writes records to a file in the configured directory,
+    /// and the WorkerGuard flushes pending writes on drop.
+    #[test]
+    fn file_layer_writes_to_disk() {
+        use tracing::Dispatch;
+        use tracing_subscriber::{Registry, layer::SubscriberExt};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let (layer, guard) = file_layer::<Registry>(
+            FileLoggerConfig::new(tmp.path())
+                .with_file_name_prefix("test")
+                .with_max_files(Some(2)),
+        )
+        .expect("file_layer setup");
+
+        let subscriber = Registry::default().with(layer);
+        let dispatch = Dispatch::new(subscriber);
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::info!(target: "file_layer_test", "hello from the file logger");
+        });
+        // Drop the guard so the non-blocking writer flushes its queue.
+        drop(guard);
+
+        // Find a file produced by the rolling appender and confirm our line
+        // is in it.
+        let mut found = false;
+        for entry in std::fs::read_dir(tmp.path()).unwrap() {
+            let entry = entry.unwrap();
+            if !entry.file_name().to_string_lossy().starts_with("test") {
+                continue;
+            }
+            let contents = std::fs::read_to_string(entry.path()).unwrap();
+            if contents.contains("hello from the file logger") {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "expected log line to be written to a test.* file");
     }
 }
