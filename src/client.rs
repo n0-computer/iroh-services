@@ -17,10 +17,9 @@ use uuid::Uuid;
 use crate::{
     api_secret::ApiSecret,
     caps::Caps,
-    logs::LogCollector,
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
     protocol::{
-        ALPN, Auth, IrohServicesClient, NameEndpoint, Ping, Pong, PutLogs, PutMetrics,
+        ALPN, Auth, IrohServicesClient, NameEndpoint, Ping, Pong, PutMetrics,
         PutNetworkDiagnostics, RemoteError,
     },
 };
@@ -55,7 +54,6 @@ pub struct Client {
     endpoint: Endpoint,
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
     _actor_task: Arc<AbortOnDropHandle<()>>,
-    _log_flush_task: Option<Arc<AbortOnDropHandle<()>>>,
 }
 
 /// ClientBuilder provides configures and builds a iroh-services client, typically
@@ -69,18 +67,10 @@ pub struct ClientBuilder {
     metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
-    log_collector: Option<LogCollector>,
-    log_flush_interval: Duration,
-    log_max_batch: usize,
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
 pub const API_SECRET_ENV_VAR_NAME: &str = "IROH_SERVICES_API_SECRET";
-
-/// Default interval between log batch flushes when log collection is enabled.
-pub const DEFAULT_LOG_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
-/// Default maximum batch size pushed in a single PutLogs request.
-pub const DEFAULT_LOG_MAX_BATCH: usize = 200;
 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
@@ -95,33 +85,7 @@ impl ClientBuilder {
             metrics_interval: Some(Duration::from_secs(60)),
             remote: None,
             registry,
-            log_collector: None,
-            log_flush_interval: DEFAULT_LOG_FLUSH_INTERVAL,
-            log_max_batch: DEFAULT_LOG_MAX_BATCH,
         }
-    }
-
-    /// Enables periodic shipment of buffered log lines to iroh-services.
-    ///
-    /// The collector is shared with [`crate::client_host::ClientHost`] when
-    /// runtime log-level overrides are needed; clone it before passing so both
-    /// sides hold a handle.
-    pub fn with_log_collection(mut self, collector: LogCollector) -> Self {
-        self.log_collector = Some(collector);
-        self
-    }
-
-    /// Override the log batch flush interval. Defaults to one second.
-    pub fn log_flush_interval(mut self, interval: Duration) -> Self {
-        self.log_flush_interval = interval;
-        self
-    }
-
-    /// Override the maximum number of lines included in a single PutLogs
-    /// request. Defaults to [`DEFAULT_LOG_MAX_BATCH`].
-    pub fn log_max_batch(mut self, max: usize) -> Self {
-        self.log_max_batch = max;
-        self
     }
 
     /// Register a metrics group to forward to iroh-services
@@ -266,20 +230,10 @@ impl ClientBuilder {
             .run(self.name, self.registry, self.metrics_interval, rx),
         ));
 
-        let log_flush_task = self.log_collector.map(|collector| {
-            let message_channel = tx.clone();
-            let interval = self.log_flush_interval;
-            let max_batch = self.log_max_batch;
-            Arc::new(AbortOnDropHandle::new(n0_future::task::spawn(
-                run_log_flush(message_channel, collector, interval, max_batch, session_id),
-            )))
-        });
-
         Ok(Client {
             endpoint: self.endpoint,
             message_channel: tx,
             _actor_task: Arc::new(actor_task),
-            _log_flush_task: log_flush_task,
         })
     }
 }
@@ -476,10 +430,6 @@ enum ClientActorMessage {
         report: Box<DiagnosticsReport>,
         done: oneshot::Sender<Result<(), Error>>,
     },
-    PutLogs {
-        request: PutLogs,
-        done: oneshot::Sender<Result<(), Error>>,
-    },
     ReadName {
         done: oneshot::Sender<Option<String>>,
     },
@@ -558,13 +508,6 @@ impl ClientActor {
                             let res = self.put_network_diagnostics(*report).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to publish network diagnostics: {:#?}", err);
-                            }
-                        }
-                        ClientActorMessage::PutLogs{ request, done } => {
-                            let res = self.put_logs(request).await;
-                            if let Err(err) = done.send(res) {
-                                debug!("failed to publish logs: {:#?}", err);
-                                self.authorized = false;
                             }
                         }
                     }
@@ -674,77 +617,6 @@ impl ClientActor {
             .map_err(|_| RemoteError::InternalServerError)??;
 
         Ok(())
-    }
-
-    async fn put_logs(&mut self, request: PutLogs) -> Result<(), Error> {
-        trace!(
-            lines = request.lines.len(),
-            dropped = request.dropped,
-            "client actor put logs"
-        );
-        self.auth().await?;
-
-        self.client
-            .rpc(request)
-            .await
-            .map_err(|_| RemoteError::InternalServerError)??;
-
-        Ok(())
-    }
-}
-
-async fn run_log_flush(
-    message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
-    collector: LogCollector,
-    interval: Duration,
-    max_batch: usize,
-    session_id: Uuid,
-) {
-    const INITIAL_BACKOFF: Duration = Duration::from_millis(500);
-    const MAX_BACKOFF: Duration = Duration::from_secs(30);
-
-    let mut ticker = n0_future::time::interval(interval);
-    // After a slow RPC the default `Burst` behavior would fire several
-    // ticks back-to-back; `Delay` waits a full interval from the previous
-    // completed tick.
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut backoff = INITIAL_BACKOFF;
-    loop {
-        ticker.tick().await;
-        let (lines, dropped) = collector.drain(max_batch);
-        if lines.is_empty() && dropped == 0 {
-            backoff = INITIAL_BACKOFF;
-            continue;
-        }
-        let request = PutLogs {
-            session_id,
-            lines,
-            dropped,
-        };
-        let (tx, rx) = oneshot::channel();
-        if message_channel
-            .send(ClientActorMessage::PutLogs { request, done: tx })
-            .await
-            .is_err()
-        {
-            // Mailbox closed only when the actor task has terminated; that
-            // means the entire client is gone and there is nothing to do.
-            debug!("log flush stopped: client actor channel closed");
-            return;
-        }
-        match rx.await {
-            Ok(Ok(())) => {
-                backoff = INITIAL_BACKOFF;
-            }
-            // Either the RPC failed (Ok(Err)) or the actor dropped the
-            // response sender mid-handoff (Err(_)). Both are transient: keep
-            // ticking and back off so the next attempt happens later.
-            other => {
-                debug!(?other, ?backoff, "log flush attempt failed; backing off");
-                n0_future::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(MAX_BACKOFF);
-            }
-        }
     }
 }
 
