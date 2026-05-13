@@ -7,12 +7,14 @@ use iroh::{
 use irpc::WithChannels;
 use irpc_iroh::read_request;
 use n0_error::AnyError;
+use n0_future::time::Duration;
 use rcan::{Capability, CapabilityOrigin, Rcan};
 use tracing::{debug, warn};
 
 use crate::{
-    caps::{Caps, NetDiagnosticsCap},
-    protocol::{ClientHostProtocol, NetDiagnosticsMessage, RemoteError},
+    caps::{Caps, LogsCap, NetDiagnosticsCap},
+    logs::LogCollector,
+    protocol::{ClientHostMessage, ClientHostProtocol, RemoteError},
 };
 
 /// The ALPN for sending messages from the cloud node to the client.
@@ -21,9 +23,10 @@ pub const CLIENT_HOST_ALPN: &[u8] = b"n0/n0des-client-host/1";
 pub type ClientHostClient = irpc::Client<ClientHostProtocol>;
 
 /// Protocol handler for cloud-to-endpoint connections.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClientHost {
     endpoint: Endpoint,
+    log_collector: Option<LogCollector>,
 }
 
 impl ProtocolHandler for ClientHost {
@@ -39,7 +42,20 @@ impl ClientHost {
     pub fn new(endpoint: &Endpoint) -> Self {
         Self {
             endpoint: endpoint.clone(),
+            log_collector: None,
         }
+    }
+
+    /// Enables the cloud to set the log level filter at runtime via the
+    /// [`SetLogLevel`] callback.
+    ///
+    /// Without a collector the handler still accepts the message but responds
+    /// with [`RemoteError::AuthError`] indicating the feature is disabled.
+    ///
+    /// [`SetLogLevel`]: crate::protocol::SetLogLevel
+    pub fn with_log_collector(mut self, collector: LogCollector) -> Self {
+        self.log_collector = Some(collector);
+        self
     }
 
     async fn handle_connection(&self, connection: Connection) -> Result<()> {
@@ -48,7 +64,7 @@ impl ClientHost {
             return Ok(());
         };
 
-        let NetDiagnosticsMessage::Auth(WithChannels { inner, tx, .. }) = first_request else {
+        let ClientHostMessage::Auth(WithChannels { inner, tx, .. }) = first_request else {
             debug!(remote_node_id = %remote_node_id.fmt_short(), "Expected initial auth message");
             connection.close(400u32.into(), b"Expected initial auth message");
             return Ok(());
@@ -66,17 +82,17 @@ impl ClientHost {
             }
         }
 
-        // Read exactly one RunNetworkDiagnostics request
+        // Read exactly one callback request
         let Some(request) = read_request::<ClientHostProtocol>(&connection).await? else {
             return Ok(());
         };
 
         match request {
-            NetDiagnosticsMessage::Auth(_) => {
+            ClientHostMessage::Auth(_) => {
                 connection.close(400u32.into(), b"Unexpected auth message");
                 anyhow::bail!("unexpected auth message");
             }
-            NetDiagnosticsMessage::RunNetworkDiagnostics(msg) => {
+            ClientHostMessage::RunNetworkDiagnostics(msg) => {
                 let WithChannels { tx, .. } = msg;
                 let needed_caps = Caps::new([NetDiagnosticsCap::GetAny]);
                 if !capability.permits(&needed_caps) {
@@ -88,6 +104,40 @@ impl ClientHost {
                 tx.send(Ok(report))
                     .await
                     .inspect_err(|e| warn!("sending network diagnostics response: {:?}", e))?;
+            }
+            ClientHostMessage::SetLogLevel(msg) => {
+                let WithChannels { inner, tx, .. } = msg;
+                let needed_caps = Caps::new([LogsCap::SetLevel]);
+                if !capability.permits(&needed_caps) {
+                    return send_missing_caps(tx, needed_caps).await;
+                }
+                let Some(ref collector) = self.log_collector else {
+                    tx.send(Err(RemoteError::AuthError(
+                        "log collection is not enabled on this client".into(),
+                    )))
+                    .await?;
+                    return Ok(());
+                };
+                let expires_in = inner.expires_in_secs.map(Duration::from_secs);
+                match collector.set_filter(
+                    &inner.directives,
+                    expires_in,
+                    inner.revert_to.as_deref(),
+                ) {
+                    Ok(()) => {
+                        debug!(
+                            directives = %inner.directives,
+                            expires_in_secs = ?inner.expires_in_secs,
+                            "applied log level override"
+                        );
+                        tx.send(Ok(())).await?;
+                    }
+                    Err(err) => {
+                        warn!(?err, "failed to apply log level override");
+                        tx.send(Err(RemoteError::AuthError(err.to_string())))
+                            .await?;
+                    }
+                }
             }
         }
 
