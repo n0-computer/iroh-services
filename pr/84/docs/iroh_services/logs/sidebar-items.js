@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_BUFFER_CAPACITY","DEFAULT_RATE_PER_SECOND"],"enum":["InstallError","SetFilterError"],"fn":["install","layer"],"struct":["LogCollector"]};
