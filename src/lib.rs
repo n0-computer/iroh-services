@@ -33,6 +33,7 @@ mod client_host;
 
 pub mod api_secret;
 pub mod caps;
+pub mod logs;
 pub mod net_diagnostics;
 pub mod protocol;
 
