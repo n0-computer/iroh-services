@@ -67,6 +67,7 @@ pub struct ClientBuilder {
     metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
+    log_collector: Option<crate::logs::LogCollector>,
 }
 
 const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
@@ -85,7 +86,21 @@ impl ClientBuilder {
             metrics_interval: Some(Duration::from_secs(60)),
             remote: None,
             registry,
+            log_collector: None,
         }
+    }
+
+    /// Enables initial-state pull of log-level directives on every
+    /// (re-)authentication. Right after `Auth` succeeds the client RPCs
+    /// the cloud for the currently-persisted setting and applies it via
+    /// [`crate::logs::LogCollector::set_filter`].
+    ///
+    /// The collector handle is also what
+    /// [`crate::ClientHost::with_log_collector`] uses to apply
+    /// dashboard-triggered overrides, so it's typically the same one.
+    pub fn with_log_collector(mut self, collector: crate::logs::LogCollector) -> Self {
+        self.log_collector = Some(collector);
+        self
     }
 
     /// Register a metrics group to forward to iroh-services
@@ -226,6 +241,7 @@ impl ClientBuilder {
                 name: self.name.clone(),
                 session_id,
                 authorized: false,
+                log_collector: self.log_collector,
             }
             .run(self.name, self.registry, self.metrics_interval, rx),
         ));
@@ -445,6 +461,7 @@ struct ClientActor {
     name: Option<String>,
     session_id: Uuid,
     authorized: bool,
+    log_collector: Option<crate::logs::LogCollector>,
 }
 
 impl ClientActor {
@@ -543,6 +560,36 @@ impl ClientActor {
             .inspect_err(|e| debug!("authorization failed: {:?}", e))
             .map_err(|e| RemoteError::AuthError(e.to_string()))?;
         self.authorized = true;
+
+        // Initial pull: ask the cloud for whatever directive override is
+        // on file for this endpoint and apply it locally. Best-effort —
+        // a failure here logs but does not block authentication. The
+        // dashboard-triggered live override path still works
+        // independently for in-session changes.
+        if let Some(collector) = self.log_collector.as_ref() {
+            match self.client.rpc(crate::protocol::GetLogLevel).await {
+                Ok(Ok(Some(settings))) => {
+                    let expires_in = settings.expires_in_secs.map(Duration::from_secs);
+                    if let Err(err) = collector.set_filter(
+                        &settings.directives,
+                        expires_in,
+                        settings.revert_to.as_deref(),
+                    ) {
+                        warn!(?err, "failed to apply initial log level");
+                    }
+                }
+                Ok(Ok(None)) => {
+                    // Endpoint not opted in — leave the filter at `off`.
+                }
+                Ok(Err(err)) => {
+                    debug!(?err, "cloud rejected initial GetLogLevel");
+                }
+                Err(err) => {
+                    debug!(?err, "initial GetLogLevel rpc failed");
+                }
+            }
+        }
+
         Ok(())
     }
 

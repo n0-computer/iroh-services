@@ -40,16 +40,19 @@ async fn main() -> Result<()> {
 
     let name = format!("logs-example-{}", &endpoint.id().to_string()[..8]);
 
-    // 3. Build the client.
+    // 3. Build the client. `with_log_collector(collector.clone())` makes
+    //    the client pull the cloud's persisted directives right after
+    //    auth and apply them locally — no waiting for the cloud to push.
     let client = Client::builder(&endpoint)
         .api_secret(secret)?
         .name(name)?
+        .with_log_collector(collector.clone())
         .build()
         .await?;
 
-    // 4. Grant `LogsCap::SetLevel` so the cloud can dial us back and apply a
-    //    filter override. Spawned so a momentarily-down cloud does not block
-    //    startup.
+    // 4. Grant `LogsCap::SetLevel` so the dashboard can dial us back with
+    //    live updates after the initial pull. Spawned so a momentarily-
+    //    down cloud does not block startup.
     let client_for_grant = client.clone();
     let grant_task = tokio::spawn(async move {
         if let Err(err) = client_for_grant
@@ -60,9 +63,9 @@ async fn main() -> Result<()> {
         }
     });
 
-    // 5. Accept the cloud's callback connections on `CLIENT_HOST_ALPN`. The
-    //    `ClientHost` needs the collector so the `SetLogLevel` request can
-    //    hot-reload the local filter.
+    // 5. Accept the cloud's callback connections on `CLIENT_HOST_ALPN`.
+    //    The `ClientHost` needs the same collector so dashboard-triggered
+    //    overrides hot-reload the local filter.
     let host = ClientHost::new(&endpoint).with_log_collector(collector);
     let router = Router::builder(endpoint)
         .accept(CLIENT_HOST_ALPN, host)

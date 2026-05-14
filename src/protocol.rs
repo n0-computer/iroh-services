@@ -33,6 +33,8 @@ pub enum IrohServicesProtocol {
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     NameEndpoint(NameEndpoint),
+    #[rpc(tx=oneshot::Sender<RemoteResult<Option<LogLevelSettings>>>)]
+    GetLogLevel(GetLogLevel),
 }
 
 /// Dedicated protocol for cloud-to-endpoint callbacks (net diagnostics, log
@@ -138,6 +140,24 @@ pub struct SetLogLevel {
     /// reverts to its install-time default. The cloud sends the project-wide
     /// default here so per-endpoint overrides decay back to project policy
     /// rather than to the client's own startup setting.
+    #[serde(default)]
+    pub revert_to: Option<String>,
+}
+
+/// Client-initiated request for the cloud's current log-level settings.
+/// Sent right after auth so the client lands on the correct filter
+/// without waiting for the cloud to push.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetLogLevel;
+
+/// Settings returned by [`GetLogLevel`]. Mirrors [`SetLogLevel`] so the
+/// client applies the result through the same [`crate::logs::LogCollector::set_filter`]
+/// code path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogLevelSettings {
+    pub directives: String,
+    #[serde(default)]
+    pub expires_in_secs: Option<u64>,
     #[serde(default)]
     pub revert_to: Option<String>,
 }
