@@ -33,7 +33,7 @@
 <a href=#33 id=33 data-nosnippet>33</a>
 <a href=#34 id=34 data-nosnippet>34</a>    <span class="attr">#[rpc(tx=oneshot::Sender&lt;RemoteResult&lt;()&gt;&gt;)]
 <a href=#35 id=35 data-nosnippet>35</a>    </span>NameEndpoint(NameEndpoint),
-<a href=#36 id=36 data-nosnippet>36</a>    <span class="attr">#[rpc(tx=oneshot::Sender&lt;RemoteResult&lt;<span class="prelude-ty">Option</span>&lt;LogLevelSettings&gt;&gt;&gt;)]
+<a href=#36 id=36 data-nosnippet>36</a>    <span class="attr">#[rpc(tx=oneshot::Sender&lt;RemoteResult&lt;<span class="prelude-ty">Option</span>&lt;SetLogLevel&gt;&gt;&gt;)]
 <a href=#37 id=37 data-nosnippet>37</a>    </span>GetLogLevel(GetLogLevel),
 <a href=#38 id=38 data-nosnippet>38</a>}
 <a href=#39 id=39 data-nosnippet>39</a>
@@ -127,38 +127,30 @@
 <a href=#127 id=127 data-nosnippet>127</a>    </span><span class="kw">pub </span>max_bytes: <span class="prelude-ty">Option</span>&lt;u64&gt;,
 <a href=#128 id=128 data-nosnippet>128</a>}
 <a href=#129 id=129 data-nosnippet>129</a>
-<a href=#130 id=130 data-nosnippet>130</a><span class="doccomment">/// Cloud-issued instruction to override the client's tracing filter.
-<a href=#131 id=131 data-nosnippet>131</a></span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
-<a href=#132 id=132 data-nosnippet>132</a></span><span class="kw">pub struct </span>SetLogLevel {
-<a href=#133 id=133 data-nosnippet>133</a>    <span class="doccomment">/// `EnvFilter`-compatible directive string (for example
-<a href=#134 id=134 data-nosnippet>134</a>    /// `"info,iroh=trace,iroh_blobs=debug"`).
-<a href=#135 id=135 data-nosnippet>135</a>    </span><span class="kw">pub </span>directives: String,
-<a href=#136 id=136 data-nosnippet>136</a>    <span class="doccomment">/// If `Some`, the client reverts after this many seconds. If `None`, the
-<a href=#137 id=137 data-nosnippet>137</a>    /// override is permanent until the next call.
-<a href=#138 id=138 data-nosnippet>138</a>    </span><span class="kw">pub </span>expires_in_secs: <span class="prelude-ty">Option</span>&lt;u64&gt;,
-<a href=#139 id=139 data-nosnippet>139</a>    <span class="doccomment">/// Directives to revert to when the TTL fires. When `None`, the client
-<a href=#140 id=140 data-nosnippet>140</a>    /// reverts to its install-time default. The cloud sends the project-wide
-<a href=#141 id=141 data-nosnippet>141</a>    /// default here so per-endpoint overrides decay back to project policy
-<a href=#142 id=142 data-nosnippet>142</a>    /// rather than to the client's own startup setting.
-<a href=#143 id=143 data-nosnippet>143</a>    </span><span class="attr">#[serde(default)]
-<a href=#144 id=144 data-nosnippet>144</a>    </span><span class="kw">pub </span>revert_to: <span class="prelude-ty">Option</span>&lt;String&gt;,
-<a href=#145 id=145 data-nosnippet>145</a>}
-<a href=#146 id=146 data-nosnippet>146</a>
-<a href=#147 id=147 data-nosnippet>147</a><span class="doccomment">/// Client-initiated request for the cloud's current log-level settings.
-<a href=#148 id=148 data-nosnippet>148</a>/// Sent right after auth so the client lands on the correct filter
-<a href=#149 id=149 data-nosnippet>149</a>/// without waiting for the cloud to push.
-<a href=#150 id=150 data-nosnippet>150</a></span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
-<a href=#151 id=151 data-nosnippet>151</a></span><span class="kw">pub struct </span>GetLogLevel;
-<a href=#152 id=152 data-nosnippet>152</a>
-<a href=#153 id=153 data-nosnippet>153</a><span class="doccomment">/// Settings returned by [`GetLogLevel`]. Mirrors [`SetLogLevel`] so the
-<a href=#154 id=154 data-nosnippet>154</a>/// client applies the result through the same [`crate::logs::LogCollector::set_filter`]
-<a href=#155 id=155 data-nosnippet>155</a>/// code path.
-<a href=#156 id=156 data-nosnippet>156</a></span><span class="attr">#[derive(Debug, Clone, Serialize, Deserialize)]
-<a href=#157 id=157 data-nosnippet>157</a></span><span class="kw">pub struct </span>LogLevelSettings {
-<a href=#158 id=158 data-nosnippet>158</a>    <span class="kw">pub </span>directives: String,
-<a href=#159 id=159 data-nosnippet>159</a>    <span class="attr">#[serde(default)]
-<a href=#160 id=160 data-nosnippet>160</a>    </span><span class="kw">pub </span>expires_in_secs: <span class="prelude-ty">Option</span>&lt;u64&gt;,
-<a href=#161 id=161 data-nosnippet>161</a>    <span class="attr">#[serde(default)]
-<a href=#162 id=162 data-nosnippet>162</a>    </span><span class="kw">pub </span>revert_to: <span class="prelude-ty">Option</span>&lt;String&gt;,
-<a href=#163 id=163 data-nosnippet>163</a>}
+<a href=#130 id=130 data-nosnippet>130</a><span class="doccomment">/// Log-level filter settings. Used in two directions:
+<a href=#131 id=131 data-nosnippet>131</a>/// - As a cloud-to-client push (via the [`crate::ClientHost`] callback)
+<a href=#132 id=132 data-nosnippet>132</a>///   to apply a new override mid-session.
+<a href=#133 id=133 data-nosnippet>133</a>/// - As the response payload to [`GetLogLevel`] so the client can pull
+<a href=#134 id=134 data-nosnippet>134</a>///   the persisted setting on connect.
+<a href=#135 id=135 data-nosnippet>135</a></span><span class="attr">#[derive(Debug, Clone, Serialize, Deserialize)]
+<a href=#136 id=136 data-nosnippet>136</a></span><span class="kw">pub struct </span>SetLogLevel {
+<a href=#137 id=137 data-nosnippet>137</a>    <span class="doccomment">/// `EnvFilter`-compatible directive string (for example
+<a href=#138 id=138 data-nosnippet>138</a>    /// `"info,iroh=trace,iroh_blobs=debug"`).
+<a href=#139 id=139 data-nosnippet>139</a>    </span><span class="kw">pub </span>directives: String,
+<a href=#140 id=140 data-nosnippet>140</a>    <span class="doccomment">/// If `Some`, the client reverts after this many seconds. If `None`, the
+<a href=#141 id=141 data-nosnippet>141</a>    /// override is permanent until the next call.
+<a href=#142 id=142 data-nosnippet>142</a>    </span><span class="kw">pub </span>expires_in_secs: <span class="prelude-ty">Option</span>&lt;u64&gt;,
+<a href=#143 id=143 data-nosnippet>143</a>    <span class="doccomment">/// Directives to revert to when the TTL fires. When `None`, the client
+<a href=#144 id=144 data-nosnippet>144</a>    /// reverts to its install-time default. The cloud sends the project-wide
+<a href=#145 id=145 data-nosnippet>145</a>    /// default here so per-endpoint overrides decay back to project policy
+<a href=#146 id=146 data-nosnippet>146</a>    /// rather than to the client's own startup setting.
+<a href=#147 id=147 data-nosnippet>147</a>    </span><span class="attr">#[serde(default)]
+<a href=#148 id=148 data-nosnippet>148</a>    </span><span class="kw">pub </span>revert_to: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#149 id=149 data-nosnippet>149</a>}
+<a href=#150 id=150 data-nosnippet>150</a>
+<a href=#151 id=151 data-nosnippet>151</a><span class="doccomment">/// Client-initiated request for the cloud's current log-level settings.
+<a href=#152 id=152 data-nosnippet>152</a>/// Sent right after auth so the client lands on the correct filter
+<a href=#153 id=153 data-nosnippet>153</a>/// without waiting for the cloud to push.
+<a href=#154 id=154 data-nosnippet>154</a></span><span class="attr">#[derive(Debug, Serialize, Deserialize)]
+<a href=#155 id=155 data-nosnippet>155</a></span><span class="kw">pub struct </span>GetLogLevel;
 </code></pre></div></section></main></body></html>
