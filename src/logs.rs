@@ -106,6 +106,12 @@ pub struct LogCollector {
 struct CollectorInner {
     reload_handle: reload::Handle<EnvFilter, Registry>,
     revert_task: Mutex<Option<AbortOnDropHandle<()>>>,
+    /// Directory where the rolling file appender writes. Used by
+    /// [`LogCollector::serve_fetch_logs`] to locate the current file.
+    log_dir: PathBuf,
+    /// Filename prefix the rolling appender uses; the date suffix is
+    /// appended for each rolled-over file.
+    file_name_prefix: String,
 }
 
 /// Off-state directive. Nothing is captured until the cloud sends a
@@ -158,6 +164,50 @@ impl LogCollector {
             .reload(filter)
             .map_err(|_| SetFilterError::ReloadFailed)
     }
+
+    /// Directory the rolling appender writes into. Exposed so that
+    /// [`crate::ClientHost`] can stream files back to the cloud on
+    /// request.
+    pub fn log_dir(&self) -> &std::path::Path {
+        &self.inner.log_dir
+    }
+
+    /// Filename prefix the rolling appender uses. Combined with the
+    /// rotation suffix to identify the current file.
+    pub fn file_name_prefix(&self) -> &str {
+        &self.inner.file_name_prefix
+    }
+
+    /// Locate the newest rolling file under [`Self::log_dir`] that starts
+    /// with [`Self::file_name_prefix`]. Returns `Ok(None)` when the
+    /// directory exists but no matching file is present.
+    pub fn current_log_file(&self) -> std::io::Result<Option<PathBuf>> {
+        let dir = self.log_dir();
+        let prefix = self.file_name_prefix();
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if !name.starts_with(prefix) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            match &best {
+                Some((_, current)) if *current >= mtime => {}
+                _ => best = Some((entry.path(), mtime)),
+            }
+        }
+        Ok(best.map(|(p, _)| p))
+    }
 }
 
 impl std::fmt::Debug for LogCollector {
@@ -204,12 +254,16 @@ pub fn layer(
     let filter = EnvFilter::try_new(OFF_DIRECTIVES).expect("'off' is always a valid directive");
     let (filter, reload_handle) = reload::Layer::new(filter);
 
+    let log_dir = config.dir.clone();
+    let file_name_prefix = config.file_name_prefix.clone();
     let (file_layer, guard) = file_layer::<Registry>(config)?;
     let layer = file_layer.with_filter(filter);
 
     let inner = Arc::new(CollectorInner {
         reload_handle,
         revert_task: Mutex::new(None),
+        log_dir,
+        file_name_prefix,
     });
     let collector = LogCollector { inner };
     Ok((collector, layer, guard))

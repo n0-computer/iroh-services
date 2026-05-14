@@ -1,5 +1,8 @@
 use anyhow::Result;
-use irpc::{channel::oneshot, rpc_requests};
+use irpc::{
+    channel::{mpsc, oneshot},
+    rpc_requests,
+};
 use rcan::Rcan;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -44,6 +47,8 @@ pub enum ClientHostProtocol {
     RunNetworkDiagnostics(RunNetworkDiagnostics),
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     SetLogLevel(SetLogLevel),
+    #[rpc(tx=mpsc::Sender<RemoteResult<Vec<u8>>>)]
+    FetchLogs(FetchLogs),
 }
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
@@ -106,6 +111,18 @@ pub struct GrantCap {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NameEndpoint {
     pub name: String,
+}
+
+/// Ask the client to stream the contents of its currently-active rolling
+/// log file. The client picks the newest file under its configured
+/// log directory matching the configured filename prefix.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FetchLogs {
+    /// Stop after this many bytes have been streamed. `None` means stream
+    /// the whole current file. The cloud caller is expected to enforce its
+    /// own plan-tier cap on top of this.
+    #[serde(default)]
+    pub max_bytes: Option<u64>,
 }
 
 /// Cloud-issued instruction to override the client's tracing filter.

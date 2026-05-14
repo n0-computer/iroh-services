@@ -131,6 +131,9 @@ cap_enum!(
         Push,
         /// Permits the bearer to set the log level filter on the issuer at runtime.
         SetLevel,
+        /// Permits the bearer to ask the issuer for the contents of its
+        /// local rolling log file.
+        Fetch,
     }
 );
 
@@ -208,6 +211,7 @@ fn client_capabilities(other: &Cap) -> bool {
         Cap::NetDiagnostics(NetDiagnosticsCap::GetAny) => true,
         Cap::Logs(LogsCap::Push) => true,
         Cap::Logs(LogsCap::SetLevel) => true,
+        Cap::Logs(LogsCap::Fetch) => true,
     }
 }
 
@@ -242,6 +246,7 @@ impl Capability for LogsCap {
         match (self, other) {
             (LogsCap::Push, LogsCap::Push) => true,
             (LogsCap::SetLevel, LogsCap::SetLevel) => true,
+            (LogsCap::Fetch, LogsCap::Fetch) => true,
             (_, _) => false,
         }
     }

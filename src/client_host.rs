@@ -14,7 +14,7 @@ use tracing::{debug, warn};
 use crate::{
     caps::{Caps, LogsCap, NetDiagnosticsCap},
     logs::LogCollector,
-    protocol::{ClientHostMessage, ClientHostProtocol, RemoteError},
+    protocol::{ClientHostMessage, ClientHostProtocol, FetchLogs, RemoteError},
 };
 
 /// The ALPN for sending messages from the cloud node to the client.
@@ -139,6 +139,23 @@ impl ClientHost {
                     }
                 }
             }
+            ClientHostMessage::FetchLogs(msg) => {
+                let WithChannels { inner, tx, .. } = msg;
+                let needed_caps = Caps::new([LogsCap::Fetch]);
+                if !capability.permits(&needed_caps) {
+                    let _ = tx
+                        .send(Err(RemoteError::MissingCapability(needed_caps)))
+                        .await;
+                } else if let Some(collector) = self.log_collector.clone() {
+                    stream_current_log_file(collector, inner, tx).await;
+                } else {
+                    let _ = tx
+                        .send(Err(RemoteError::AuthError(
+                            "log collection is not enabled on this client".into(),
+                        )))
+                        .await;
+                }
+            }
         }
 
         connection.closed().await;
@@ -181,6 +198,80 @@ async fn send_missing_caps<T>(
     Ok(())
 }
 
+/// Chunk size for streaming the rolling file back. 64 KiB is large enough
+/// to amortize the round-trip overhead and small enough that a tight
+/// `max_bytes` clamp still produces granular cut-off points.
+const FETCH_LOGS_CHUNK_BYTES: usize = 64 * 1024;
+
+/// Open the collector's currently-active rolling file and stream it back
+/// over `tx` in 64 KiB chunks. Stops at end-of-file or when
+/// `request.max_bytes` is reached. Errors during read are reported as a
+/// terminal `Err` chunk; the receiver should treat the stream's end as
+/// success.
+async fn stream_current_log_file(
+    collector: LogCollector,
+    request: FetchLogs,
+    tx: irpc::channel::mpsc::Sender<Result<Vec<u8>, RemoteError>>,
+) {
+    use tokio::io::AsyncReadExt;
+
+    let path = match collector.current_log_file() {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            let _ = tx
+                .send(Err(RemoteError::AuthError(
+                    "no log file is present on this client".into(),
+                )))
+                .await;
+            return;
+        }
+        Err(err) => {
+            warn!(?err, "failed to locate current log file");
+            let _ = tx.send(Err(RemoteError::InternalServerError)).await;
+            return;
+        }
+    };
+
+    let mut file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(err) => {
+            warn!(?err, path = %path.display(), "failed to open log file");
+            let _ = tx.send(Err(RemoteError::InternalServerError)).await;
+            return;
+        }
+    };
+
+    let max_bytes = request.max_bytes.unwrap_or(u64::MAX);
+    let mut sent: u64 = 0;
+    let mut buf = vec![0u8; FETCH_LOGS_CHUNK_BYTES];
+    loop {
+        let remaining = max_bytes.saturating_sub(sent);
+        if remaining == 0 {
+            break;
+        }
+        let take = (remaining.min(buf.len() as u64)) as usize;
+        let n = match file.read(&mut buf[..take]).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(err) => {
+                warn!(?err, "log file read failed");
+                let _ = tx.send(Err(RemoteError::InternalServerError)).await;
+                return;
+            }
+        };
+        if tx.send(Ok(buf[..n].to_vec())).await.is_err() {
+            // Receiver hung up; nothing more to do.
+            return;
+        }
+        sent = sent.saturating_add(n as u64);
+    }
+    debug!(
+        path = %path.display(),
+        bytes = sent,
+        "streamed log file to remote"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use iroh::{address_lookup::MemoryLookup, endpoint::presets, protocol::Router};
@@ -191,7 +282,8 @@ mod tests {
     use crate::{
         ALPN,
         caps::create_grant_token,
-        protocol::{Auth, IrohServicesClient, RunNetworkDiagnostics},
+        logs::{self, FileLoggerConfig},
+        protocol::{Auth, FetchLogs as FetchLogsReq, IrohServicesClient, RunNetworkDiagnostics},
     };
 
     #[tokio::test]
@@ -281,6 +373,137 @@ mod tests {
         assert!(
             result.is_err(),
             "expected auth to be rejected for self-signed RCAN"
+        );
+
+        router.shutdown().await.unwrap();
+        client_ep.close().await;
+    }
+
+    /// FetchLogs streams the currently-active rolling file from the
+    /// endpoint back to the cloud caller in chunks.
+    #[tokio::test]
+    async fn test_fetch_logs_streams_current_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Stand up a LogCollector pointing at the tempdir but skip the
+        // global subscriber init: we want a controlled file we wrote
+        // directly, not whatever the appender buffers.
+        let (collector, _layer, guard) =
+            logs::layer(FileLoggerConfig::new(tmp.path()).with_file_name_prefix("fetch-test"))
+                .unwrap();
+        drop(guard);
+
+        // Write a known payload to a file matching the prefix so
+        // `current_log_file` picks it up.
+        let payload: Vec<u8> = (0..200_000u32).flat_map(|i| i.to_le_bytes()).collect();
+        let file_path = tmp.path().join("fetch-test.2026-05-14");
+        std::fs::write(&file_path, &payload).unwrap();
+
+        let lookup = MemoryLookup::new();
+        let server_ep = iroh::Endpoint::builder(presets::Minimal)
+            .address_lookup(lookup.clone())
+            .bind()
+            .await
+            .unwrap();
+        let client_ep = iroh::Endpoint::builder(presets::Minimal)
+            .address_lookup(lookup.clone())
+            .bind()
+            .await
+            .unwrap();
+
+        let host = ClientHost::new(&server_ep).with_log_collector(collector);
+        let router = Router::builder(server_ep.clone())
+            .accept(CLIENT_HOST_ALPN, host)
+            .spawn();
+
+        // Issue a grant that includes LogsCap::Fetch.
+        let rcan = create_grant_token(
+            server_ep.secret_key().clone(),
+            client_ep.id(),
+            Duration::from_secs(3600),
+            Caps::new([LogsCap::Fetch]),
+        )
+        .unwrap();
+        let conn = IrohLazyRemoteConnection::new(
+            client_ep.clone(),
+            server_ep.addr(),
+            CLIENT_HOST_ALPN.to_vec(),
+        );
+        let client = ClientHostClient::boxed(conn);
+        client.rpc(Auth { caps: rcan }).await.unwrap();
+
+        let mut rx = client
+            .server_streaming(FetchLogsReq { max_bytes: None }, 16)
+            .await
+            .unwrap();
+
+        let mut got: Vec<u8> = Vec::new();
+        while let Some(chunk) = rx.recv().await.expect("server stream irpc error") {
+            let bytes = chunk.expect("server returned RemoteError");
+            got.extend_from_slice(&bytes);
+        }
+        assert_eq!(got, payload, "streamed bytes should match the file");
+
+        router.shutdown().await.unwrap();
+        client_ep.close().await;
+    }
+
+    /// Endpoints without `LogsCap::Fetch` get a `MissingCapability` error
+    /// on the stream and no data.
+    #[tokio::test]
+    async fn test_fetch_logs_rejects_missing_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (collector, _layer, guard) =
+            logs::layer(FileLoggerConfig::new(tmp.path()).with_file_name_prefix("noaccess"))
+                .unwrap();
+        drop(guard);
+
+        let lookup = MemoryLookup::new();
+        let server_ep = iroh::Endpoint::builder(presets::Minimal)
+            .address_lookup(lookup.clone())
+            .bind()
+            .await
+            .unwrap();
+        let client_ep = iroh::Endpoint::builder(presets::Minimal)
+            .address_lookup(lookup.clone())
+            .bind()
+            .await
+            .unwrap();
+
+        let host = ClientHost::new(&server_ep).with_log_collector(collector);
+        let router = Router::builder(server_ep.clone())
+            .accept(CLIENT_HOST_ALPN, host)
+            .spawn();
+
+        // Grant SetLevel, not Fetch.
+        let rcan = create_grant_token(
+            server_ep.secret_key().clone(),
+            client_ep.id(),
+            Duration::from_secs(3600),
+            Caps::new([LogsCap::SetLevel]),
+        )
+        .unwrap();
+        let conn = IrohLazyRemoteConnection::new(
+            client_ep.clone(),
+            server_ep.addr(),
+            CLIENT_HOST_ALPN.to_vec(),
+        );
+        let client = ClientHostClient::boxed(conn);
+        client.rpc(Auth { caps: rcan }).await.unwrap();
+
+        let mut rx = client
+            .server_streaming(FetchLogsReq { max_bytes: None }, 4)
+            .await
+            .unwrap();
+
+        let first = rx
+            .recv()
+            .await
+            .expect("server stream irpc error")
+            .expect("stream should produce one error");
+        assert!(matches!(first, Err(RemoteError::MissingCapability(_))));
+        assert!(
+            rx.recv().await.expect("server stream irpc error").is_none(),
+            "stream should close after error",
         );
 
         router.shutdown().await.unwrap();
