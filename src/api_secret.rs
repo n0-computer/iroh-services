@@ -22,7 +22,7 @@ pub struct ApiSecret {
 
 impl Display for ApiSecret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", Ticket::serialize(self))
+        write!(f, "{}", self.encode_string())
     }
 }
 
@@ -49,7 +49,7 @@ impl Ticket for ApiSecret {
     // string. It should be a short, human readable string
     const KIND: &'static str = "services";
 
-    fn to_bytes(&self) -> Vec<u8> {
+    fn encode_bytes(&self) -> Vec<u8> {
         let data = TicketWireFormat::Variant0(Variant0ServicesTicket {
             secret: self.secret.clone(),
             addr: Variant0EndpointAddr {
@@ -60,7 +60,7 @@ impl Ticket for ApiSecret {
         postcard::to_stdvec(&data).expect("postcard serialization failed")
     }
 
-    fn from_bytes(bytes: &[u8]) -> Result<Self, ParseError> {
+    fn decode_bytes(bytes: &[u8]) -> Result<Self, ParseError> {
         let res: TicketWireFormat = postcard::from_bytes(bytes)?;
         let TicketWireFormat::Variant0(Variant0ServicesTicket { secret, addr }) = res;
         Ok(Self {
@@ -77,7 +77,7 @@ impl FromStr for ApiSecret {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        iroh_tickets::Ticket::deserialize(s)
+        Self::decode_string(s)
     }
 }
 
