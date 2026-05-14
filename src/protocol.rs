@@ -33,7 +33,7 @@ pub enum IrohServicesProtocol {
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     NameEndpoint(NameEndpoint),
-    #[rpc(tx=oneshot::Sender<RemoteResult<Option<LogLevelSettings>>>)]
+    #[rpc(tx=oneshot::Sender<RemoteResult<Option<SetLogLevel>>>)]
     GetLogLevel(GetLogLevel),
 }
 
@@ -127,8 +127,12 @@ pub struct FetchLogs {
     pub max_bytes: Option<u64>,
 }
 
-/// Cloud-issued instruction to override the client's tracing filter.
-#[derive(Debug, Serialize, Deserialize)]
+/// Log-level filter settings. Used in two directions:
+/// - As a cloud-to-client push (via the [`crate::ClientHost`] callback)
+///   to apply a new override mid-session.
+/// - As the response payload to [`GetLogLevel`] so the client can pull
+///   the persisted setting on connect.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetLogLevel {
     /// `EnvFilter`-compatible directive string (for example
     /// `"info,iroh=trace,iroh_blobs=debug"`).
@@ -149,15 +153,3 @@ pub struct SetLogLevel {
 /// without waiting for the cloud to push.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GetLogLevel;
-
-/// Settings returned by [`GetLogLevel`]. Mirrors [`SetLogLevel`] so the
-/// client applies the result through the same [`crate::logs::LogCollector::set_filter`]
-/// code path.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogLevelSettings {
-    pub directives: String,
-    #[serde(default)]
-    pub expires_in_secs: Option<u64>,
-    #[serde(default)]
-    pub revert_to: Option<String>,
-}

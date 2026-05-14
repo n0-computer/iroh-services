@@ -24,13 +24,11 @@
 //! use iroh_services::logs::{self, FileLoggerConfig};
 //!
 //! # fn main() -> anyhow::Result<()> {
-//! // Installs a global subscriber. The filter starts at `off`; once a
-//! // ClientHost connection is up, the cloud pushes a SetLogLevel that
-//! // raises it to whatever the dashboard says.
+//! // Installs a global subscriber. The filter starts at `off`; the
+//! // Client pulls the cloud-persisted directive right after Auth and
+//! // applies it via the collector. The dashboard can also push live
+//! // overrides via ClientHost::set_log_level after that.
 //! let (collector, _guard) = logs::install(FileLoggerConfig::new("./logs"))?;
-//!
-//! // Hand the collector to ClientHost so it can call `collector.set_filter`
-//! // when the cloud pushes overrides.
 //! # let _ = collector;
 //! # Ok(())
 //! # }
@@ -76,9 +74,6 @@ pub enum InstallError {
     /// The default tracing dispatcher is already set; install once at startup.
     #[error("global tracing dispatcher is already set")]
     AlreadyInstalled,
-    /// The supplied directives string was rejected by `EnvFilter`.
-    #[error("invalid filter directives: {0}")]
-    InvalidDirectives(String),
     /// File logger setup failed (could not create directory, open appender,
     /// etc.).
     #[error("file logger setup failed: {0}")]
@@ -165,25 +160,15 @@ impl LogCollector {
             .map_err(|_| SetFilterError::ReloadFailed)
     }
 
-    /// Directory the rolling appender writes into. Exposed so that
-    /// [`crate::ClientHost`] can stream files back to the cloud on
-    /// request.
-    pub fn log_dir(&self) -> &std::path::Path {
-        &self.inner.log_dir
-    }
-
-    /// Filename prefix the rolling appender uses. Combined with the
-    /// rotation suffix to identify the current file.
-    pub fn file_name_prefix(&self) -> &str {
-        &self.inner.file_name_prefix
-    }
-
-    /// Locate the newest rolling file under [`Self::log_dir`] that starts
-    /// with [`Self::file_name_prefix`]. Returns `Ok(None)` when the
-    /// directory exists but no matching file is present.
-    pub fn current_log_file(&self) -> std::io::Result<Option<PathBuf>> {
-        let dir = self.log_dir();
-        let prefix = self.file_name_prefix();
+    /// Locate the newest rolling file in the configured log directory
+    /// whose name starts with the configured filename prefix. Returns
+    /// `Ok(None)` when the directory exists but no matching file is
+    /// present. Used by [`crate::ClientHost`] to serve [`FetchLogs`].
+    ///
+    /// [`FetchLogs`]: crate::protocol::FetchLogs
+    pub(crate) fn current_log_file(&self) -> std::io::Result<Option<PathBuf>> {
+        let dir = &self.inner.log_dir;
+        let prefix = &self.inner.file_name_prefix;
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
