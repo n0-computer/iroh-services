@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 use irpc::{channel::oneshot, rpc_requests};
 use rcan::Rcan;
@@ -30,6 +32,12 @@ pub enum IrohServicesProtocol {
 
     #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
     NameEndpoint(NameEndpoint),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    SetGroup(SetGroup),
+
+    #[rpc(tx=oneshot::Sender<RemoteResult<()>>)]
+    SetAttributes(SetAttributes),
 }
 
 /// Dedicated protocol for cloud-to-endpoint net diagnostics connections.
@@ -103,4 +111,16 @@ pub struct GrantCap {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NameEndpoint {
     pub name: String,
+}
+
+/// Attach the client endpoint to a single named group cloud-side.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SetGroup {
+    pub group: String,
+}
+
+/// Replace the arbitrary key-value attributes on the client endpoint cloud-side.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SetAttributes {
+    pub attributes: BTreeMap<String, String>,
 }
