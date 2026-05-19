@@ -10,6 +10,7 @@ use iroh::{EndpointAddr, EndpointId, SecretKey, TransportAddr};
 use iroh_tickets::{ParseError, Ticket};
 use serde::{Deserialize, Serialize};
 
+/// The environment variable name this crate checks in builders for an API secret.
 pub const API_SECRET_ENV_VAR_NAME: &str = "IROH_SERVICES_API_SECRET";
 
 /// The secret material used to connect your services.iroh.computer project. The

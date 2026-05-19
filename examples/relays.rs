@@ -1,4 +1,14 @@
-//! This example shows using custom relays provided by iroh services.
+//! This example shows common methods for configuring custom relays provided by iroh services.
+//! All of these leverage the [`iroh_services::preset`] builder to configure the endpoint,
+//! which itself builds an [`iroh::presets::Preset`] to pass to an [`iroh::Endpoint`] on
+//! construction.
+//!
+//! To run these, set IROH_SERVICES_API_SECRET in your environment, using an API secret
+//! from your iroh services project, and then run with `cargo run --example relays`.
+//!
+//! Your app will use only one of these methods, depending on your use case. To test this
+//! example with custom relay URLS, you will need to comment out the secret key preset
+//! example and use the `relays` method instead, pasting in your own relay URLs.
 use iroh::{Endpoint, SecretKey};
 
 #[tokio::main]
@@ -9,21 +19,21 @@ async fn main() -> anyhow::Result<()> {
     let _preset = iroh_services::preset().api_secret_from_env()?.build()?;
 
     // pro & enterprise projects have access to custom relays, which are set
-    // with the `relays` method on the builder:
+    // with the `relays` method on the builder.
+    // You'll need to replace these strings with the relay urls for your project.
     let _preset = iroh_services::preset()
         .relays([
-            "https://us-east1.project_username.iroh.link",
-            "https://eu-west1.project_username.iroh.link",
-            "https://eu-central1.project_username.iroh.link",
+            "https://use1-1.relay.username.project.iroh.link",
+            "https://usw1-1.relay.username.project.iroh.link",
+            "https://euc1-1.relay.username.project.iroh.link",
         ])?
         .api_secret_from_env()?
         .build()?;
 
     // if you are using a secret key from disk, or generally want control over
     // the ID your endpoint uses, the secret key must be given to the preset
-    // before passing it to the endpoint (because the endpoint ID is the public
-    // half of the secret keypair). The access token that's created by the
-    // preset to access relays is scoped only to the given key.
+    // before passing it to the endpoint. The access token that the preset creates
+    // to access relays is scoped only to the given key.
     //
     // If no key is provided, a random one is generated and passed to the
     // endpoint.
@@ -37,7 +47,13 @@ async fn main() -> anyhow::Result<()> {
     // we clone the preset so we can reuse to get a client builder below
     let endpoint = Endpoint::bind(preset.clone()).await?;
 
-    // a client is not required to use
+    // wait for the endpoint to be online, to prove we have an authorized
+    // connection to a relay
+    endpoint.online().await;
+
+    // a client is not required to use, but the preset has a convenience method
+    // for creating a client builder that uses the same access token as the
+    // endpoint, so you don't need to pass the secret key separately:
     let client = preset.client_builder(&endpoint).build().await?;
 
     // we can also ping the service just to confirm everything is working
