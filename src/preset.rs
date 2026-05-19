@@ -56,6 +56,7 @@ impl IrohServicesPreset {
         &self.api_secret
     }
 
+    /// Returns a [`ClientBuilder`] pre-configured with this preset's API secret.
     pub fn client_builder(&self, endpoint: &Endpoint) -> ClientBuilder {
         ClientBuilder::new(endpoint)
             .api_secret(self.api_secret.clone())
@@ -164,7 +165,7 @@ impl PresetBuilder {
             ));
         };
 
-        // build our token to set on relays
+        // build our token to interact with relays. This is only scoped to relay use.
         let rcan = crate::caps::create_api_token_from_secret_key(
             api_secret.secret.clone(),
             secret_key.public(),
