@@ -60,3 +60,6 @@ default = []
 
 [[example]]
 name = "net_diagnostics"
+
+[[example]]
+name = "logs"
