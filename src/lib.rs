@@ -36,7 +36,7 @@ mod openssh;
 pub mod api_secret;
 pub mod caps;
 pub mod net_diagnostics;
-pub mod preset;
+mod preset;
 pub mod protocol;
 
 mod built_info {

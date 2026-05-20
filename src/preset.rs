@@ -49,7 +49,7 @@ impl IrohServicesPreset {
         preset()
     }
 
-    /// Returns the [`ApiSecret`] stashed on this preset, if one was set.
+    /// Returns the [`ApiSecret`] used to create this preset.
     /// Useful for handing the same secret to a [`crate::Client`] without
     /// plumbing it through twice.
     pub fn api_secret(&self) -> &ApiSecret {
@@ -58,6 +58,8 @@ impl IrohServicesPreset {
 
     /// Returns a [`ClientBuilder`] pre-configured with this preset's API secret.
     pub fn client_builder(&self, endpoint: &Endpoint) -> ClientBuilder {
+        // unwrap is ok here because the api_secret has been factored
+        // to the point that it can no longer fail.
         ClientBuilder::new(endpoint)
             .api_secret(self.api_secret.clone())
             .unwrap()
@@ -105,6 +107,19 @@ impl PresetBuilder {
         self
     }
 
+    /// Set relay URLs. This method accepts any iterator of &str, allowing the
+    /// common pattern:
+    /// ```no_run
+    /// let _preset = iroh_services::preset()
+    ///     .relays([
+    ///         "https://us-east1.project_username.iroh.link",
+    ///         "https://eu-west1.project_username.iroh.link",
+    ///         "https://eu-central1.project_username.iroh.link",
+    ///     ])?
+    ///     .api_secret_from_env()?
+    ///     .build()?;
+    /// Ok(())
+    /// ```
     pub fn relays<I, S>(mut self, relays: I) -> Result<Self>
     where
         I: IntoIterator<Item = S>,
