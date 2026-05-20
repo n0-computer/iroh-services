@@ -110,15 +110,17 @@ impl PresetBuilder {
     /// Set relay URLs. This method accepts any iterator of &str, allowing the
     /// common pattern:
     /// ```no_run
-    /// let _preset = iroh_services::preset()
-    ///     .relays([
-    ///         "https://us-east1.project_username.iroh.link",
-    ///         "https://eu-west1.project_username.iroh.link",
-    ///         "https://eu-central1.project_username.iroh.link",
-    ///     ])?
-    ///     .api_secret_from_env()?
-    ///     .build()?;
-    /// Ok(())
+    /// fn build() -> anyhow::Result<()> {
+    ///     let _preset = iroh_services::preset()
+    ///         .relays([
+    ///             "https://us-east1.project_username.iroh.link",
+    ///             "https://eu-west1.project_username.iroh.link",
+    ///             "https://eu-central1.project_username.iroh.link",
+    ///         ])?
+    ///         .api_secret_from_env()?
+    ///         .build()?;
+    ///     Ok(())
+    /// }
     /// ```
     pub fn relays<I, S>(mut self, relays: I) -> Result<Self>
     where
