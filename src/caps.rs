@@ -6,8 +6,7 @@ use n0_future::time::Duration;
 use rcan::{Capability, Expires, Rcan};
 use serde::{Deserialize, Serialize};
 
-/// How long tokens are valid for by default
-pub(crate) const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
+pub(crate) const DEFAULT_CAP_EXPIRY: Duration = Duration::from_hours(24 * 30); // 1 month
 
 macro_rules! cap_enum(
     ($enum:item) => {
