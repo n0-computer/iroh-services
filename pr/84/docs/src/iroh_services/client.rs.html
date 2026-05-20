@@ -199,20 +199,20 @@
 <a href=#199 id=199 data-nosnippet>199</a>    }
 <a href=#200 id=200 data-nosnippet>200</a>
 <a href=#201 id=201 data-nosnippet>201</a>    <span class="doccomment">/// Loads the private ssh key from the given path, and creates the needed capability.
-<a href=#202 id=202 data-nosnippet>202</a>    </span><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
-<a href=#203 id=203 data-nosnippet>203</a>    </span><span class="kw">pub async fn </span>ssh_key_from_file&lt;P: AsRef&lt;std::path::Path&gt;&gt;(<span class="self">self</span>, path: P) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
-<a href=#204 id=204 data-nosnippet>204</a>        <span class="kw">let </span>file_content = tokio::fs::read_to_string(path).<span class="kw">await</span><span class="question-mark">?</span>;
-<a href=#205 id=205 data-nosnippet>205</a>        <span class="kw">let </span>private_key = ssh_key::PrivateKey::from_openssh(<span class="kw-2">&amp;</span>file_content)<span class="question-mark">?</span>;
-<a href=#206 id=206 data-nosnippet>206</a>
-<a href=#207 id=207 data-nosnippet>207</a>        <span class="self">self</span>.ssh_key(<span class="kw-2">&amp;</span>private_key)
+<a href=#202 id=202 data-nosnippet>202</a>    ///
+<a href=#203 id=203 data-nosnippet>203</a>    /// The file must contain an unencrypted PEM-encoded OpenSSH ed25519 private key.
+<a href=#204 id=204 data-nosnippet>204</a>    </span><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#205 id=205 data-nosnippet>205</a>    </span><span class="kw">pub async fn </span>ssh_key_from_file&lt;P: AsRef&lt;std::path::Path&gt;&gt;(<span class="self">self</span>, path: P) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#206 id=206 data-nosnippet>206</a>        <span class="kw">let </span>file_content = tokio::fs::read_to_string(path).<span class="kw">await</span><span class="question-mark">?</span>;
+<a href=#207 id=207 data-nosnippet>207</a>        <span class="self">self</span>.ssh_key(<span class="kw-2">&amp;</span>file_content)
 <a href=#208 id=208 data-nosnippet>208</a>    }
 <a href=#209 id=209 data-nosnippet>209</a>
-<a href=#210 id=210 data-nosnippet>210</a>    <span class="doccomment">/// Creates the capability from the provided private ssh key.
+<a href=#210 id=210 data-nosnippet>210</a>    <span class="doccomment">/// Creates the capability from the provided PEM-encoded OpenSSH ed25519 private key.
 <a href=#211 id=211 data-nosnippet>211</a>    </span><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
-<a href=#212 id=212 data-nosnippet>212</a>    </span><span class="kw">pub fn </span>ssh_key(<span class="kw-2">mut </span><span class="self">self</span>, key: <span class="kw-2">&amp;</span>ssh_key::PrivateKey) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+<a href=#212 id=212 data-nosnippet>212</a>    </span><span class="kw">pub fn </span>ssh_key(<span class="kw-2">mut </span><span class="self">self</span>, pem: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
 <a href=#213 id=213 data-nosnippet>213</a>        <span class="kw">let </span>local_id = <span class="self">self</span>.endpoint.id();
-<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">let </span>rcan = <span class="kw">crate</span>::caps::create_api_token_from_ssh_key(
-<a href=#215 id=215 data-nosnippet>215</a>            key,
+<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">let </span>rcan = <span class="kw">crate</span>::caps::create_api_token_from_openssh_pem(
+<a href=#215 id=215 data-nosnippet>215</a>            pem,
 <a href=#216 id=216 data-nosnippet>216</a>            local_id,
 <a href=#217 id=217 data-nosnippet>217</a>            <span class="self">self</span>.cap_expiry,
 <a href=#218 id=218 data-nosnippet>218</a>            Caps::all(),
