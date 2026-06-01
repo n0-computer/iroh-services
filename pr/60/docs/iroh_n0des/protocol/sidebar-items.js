@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["ALPN"],"enum":["N0desMessage","N0desProtocol","RemoteError"],"struct":["Auth","GetTicket","ListTickets","Ping","Pong","PublishTicket","PutMetrics","PutNetworkDiagnostics","TicketData","UnpublishTicket"],"type":["N0desClient","RemoteResult"]};
