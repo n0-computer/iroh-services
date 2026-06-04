@@ -6,6 +6,8 @@ use n0_future::time::Duration;
 use rcan::{Capability, Expires, Rcan};
 use serde::{Deserialize, Serialize};
 
+pub(crate) const DEFAULT_CAP_EXPIRY: Duration = Duration::from_hours(24 * 30); // 1 month
+
 macro_rules! cap_enum(
     ($enum:item) => {
         #[derive(

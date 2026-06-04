@@ -1725,6 +1725,7 @@ dependencies = [
  "base64",
  "built",
  "bytes",
+ "data-encoding",
  "derive_more",
  "ed25519-dalek",
  "futures-buffered",
