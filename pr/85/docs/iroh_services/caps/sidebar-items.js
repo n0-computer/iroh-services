@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Cap","Caps","LogsCap","MetricsCap","NetDiagnosticsCap","RelayCap"],"fn":["create_api_token_from_secret_key","create_api_token_from_ssh_key","create_grant_token"],"struct":["CapSet"]};
+window.SIDEBAR_ITEMS = {"enum":["Cap","Caps","LogsCap","MetricsCap","NetDiagnosticsCap","RelayCap"],"fn":["create_api_token_from_openssh_pem","create_api_token_from_secret_key","create_grant_token"],"struct":["CapSet"]};
