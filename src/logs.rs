@@ -254,17 +254,16 @@ pub fn layer(
     Ok((collector, layer, guard))
 }
 
-/// How often the rolling file appender starts a new file.
-///
-/// Re-exported from `tracing-appender` so callers don't need to depend on it
-/// directly.
-pub use tracing_appender::rolling::Rotation;
-
 /// Guard returned by [`file_layer`] / [`layer`] / [`install`] that keeps the
 /// non-blocking writer's worker thread alive. Drop this only at process
 /// shutdown; once dropped, any buffered records still in flight are flushed
 /// and the file layer stops accepting writes.
 pub use tracing_appender::non_blocking::WorkerGuard;
+/// How often the rolling file appender starts a new file.
+///
+/// Re-exported from `tracing-appender` so callers don't need to depend on it
+/// directly.
+pub use tracing_appender::rolling::Rotation;
 
 /// Errors raised when constructing the file logger.
 #[derive(Debug, thiserror::Error)]
