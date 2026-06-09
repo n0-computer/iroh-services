@@ -35,6 +35,9 @@ mod openssh;
 
 pub mod api_secret;
 pub mod caps;
+// File-based log collection is native-only (rolling file appender, fs access).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod logs;
 pub mod net_diagnostics;
 mod preset;
 pub mod protocol;
