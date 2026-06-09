@@ -15,8 +15,8 @@ use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 use crate::{
-    api_secret::ApiSecret,
-    caps::Caps,
+    api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
+    caps::{Caps, DEFAULT_CAP_EXPIRY},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
     protocol::{
         ALPN, Auth, IrohServicesClient, NameEndpoint, Ping, Pong, PutMetrics,
@@ -69,9 +69,6 @@ pub struct ClientBuilder {
     registry: Registry,
     log_collector: Option<crate::logs::LogCollector>,
 }
-
-const DEFAULT_CAP_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 1 month
-pub const API_SECRET_ENV_VAR_NAME: &str = "IROH_SERVICES_API_SECRET";
 
 impl ClientBuilder {
     pub fn new(endpoint: &Endpoint) -> Self {
@@ -178,20 +175,20 @@ impl ClientBuilder {
     }
 
     /// Loads the private ssh key from the given path, and creates the needed capability.
+    ///
+    /// The file must contain an unencrypted PEM-encoded OpenSSH ed25519 private key.
     #[cfg(not(target_arch = "wasm32"))]
     pub async fn ssh_key_from_file<P: AsRef<std::path::Path>>(self, path: P) -> Result<Self> {
         let file_content = tokio::fs::read_to_string(path).await?;
-        let private_key = ssh_key::PrivateKey::from_openssh(&file_content)?;
-
-        self.ssh_key(&private_key)
+        self.ssh_key(&file_content)
     }
 
-    /// Creates the capability from the provided private ssh key.
+    /// Creates the capability from the provided PEM-encoded OpenSSH ed25519 private key.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn ssh_key(mut self, key: &ssh_key::PrivateKey) -> Result<Self> {
+    pub fn ssh_key(mut self, pem: &str) -> Result<Self> {
         let local_id = self.endpoint.id();
-        let rcan = crate::caps::create_api_token_from_ssh_key(
-            key,
+        let rcan = crate::caps::create_api_token_from_openssh_pem(
+            pem,
             local_id,
             self.cap_expiry,
             Caps::all(),

@@ -30,11 +30,14 @@
 
 mod client;
 mod client_host;
+#[cfg(not(target_arch = "wasm32"))]
+mod openssh;
 
 pub mod api_secret;
 pub mod caps;
 pub mod logs;
 pub mod net_diagnostics;
+mod preset;
 pub mod protocol;
 
 mod built_info {
@@ -58,8 +61,9 @@ pub use client_host::{CLIENT_HOST_ALPN, ClientHost, ClientHostClient};
 pub use iroh_metrics::Registry;
 
 pub use self::{
-    api_secret::ApiSecret,
-    client::{API_SECRET_ENV_VAR_NAME, Client, ClientBuilder},
+    api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
+    client::{Client, ClientBuilder},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
+    preset::{IrohServicesPreset, PresetBuilder, preset},
     protocol::ALPN,
 };
