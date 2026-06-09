@@ -7,15 +7,18 @@ use iroh::{
 use irpc::WithChannels;
 use irpc_iroh::read_request;
 use n0_error::AnyError;
+#[cfg(not(target_arch = "wasm32"))]
 use n0_future::time::Duration;
 use rcan::{Capability, CapabilityOrigin, Rcan};
 use tracing::{debug, warn};
 
 use crate::{
     caps::{Caps, LogsCap, NetDiagnosticsCap},
-    logs::LogCollector,
-    protocol::{ClientHostMessage, ClientHostProtocol, FetchLogs, RemoteError},
+    protocol::{ClientHostMessage, ClientHostProtocol, RemoteError},
 };
+// File-based log collection is native-only.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::{logs::LogCollector, protocol::FetchLogs};
 
 /// The ALPN for sending messages from the cloud node to the client.
 pub const CLIENT_HOST_ALPN: &[u8] = b"n0/n0des-client-host/1";
@@ -26,6 +29,7 @@ pub type ClientHostClient = irpc::Client<ClientHostProtocol>;
 #[derive(Debug, Clone)]
 pub struct ClientHost {
     endpoint: Endpoint,
+    #[cfg(not(target_arch = "wasm32"))]
     log_collector: Option<LogCollector>,
 }
 
@@ -42,6 +46,7 @@ impl ClientHost {
     pub fn new(endpoint: &Endpoint) -> Self {
         Self {
             endpoint: endpoint.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
             log_collector: None,
         }
     }
@@ -52,7 +57,11 @@ impl ClientHost {
     /// Without a collector the handler still accepts the message but responds
     /// with [`RemoteError::AuthError`] indicating the feature is disabled.
     ///
+    /// File-based log collection is native-only, so this is unavailable on
+    /// wasm.
+    ///
     /// [`SetLogLevel`]: crate::protocol::SetLogLevel
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_log_collector(mut self, collector: LogCollector) -> Self {
         self.log_collector = Some(collector);
         self
@@ -111,32 +120,45 @@ impl ClientHost {
                 if !capability.permits(&needed_caps) {
                     return send_missing_caps(tx, needed_caps).await;
                 }
-                let Some(ref collector) = self.log_collector else {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let Some(ref collector) = self.log_collector else {
+                        tx.send(Err(RemoteError::AuthError(
+                            "log collection is not enabled on this client".into(),
+                        )))
+                        .await?;
+                        return Ok(());
+                    };
+                    let expires_in = inner.expires_in_secs.map(Duration::from_secs);
+                    match collector.set_filter(
+                        &inner.directives,
+                        expires_in,
+                        inner.revert_to.as_deref(),
+                    ) {
+                        Ok(()) => {
+                            debug!(
+                                directives = %inner.directives,
+                                expires_in_secs = ?inner.expires_in_secs,
+                                "applied log level override"
+                            );
+                            tx.send(Ok(())).await?;
+                        }
+                        Err(err) => {
+                            warn!(?err, "failed to apply log level override");
+                            tx.send(Err(RemoteError::AuthError(err.to_string())))
+                                .await?;
+                        }
+                    }
+                }
+                // The file logger is native-only; on wasm there is no
+                // collector to drive.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let _ = inner;
                     tx.send(Err(RemoteError::AuthError(
-                        "log collection is not enabled on this client".into(),
+                        "log collection is not available on this client".into(),
                     )))
                     .await?;
-                    return Ok(());
-                };
-                let expires_in = inner.expires_in_secs.map(Duration::from_secs);
-                match collector.set_filter(
-                    &inner.directives,
-                    expires_in,
-                    inner.revert_to.as_deref(),
-                ) {
-                    Ok(()) => {
-                        debug!(
-                            directives = %inner.directives,
-                            expires_in_secs = ?inner.expires_in_secs,
-                            "applied log level override"
-                        );
-                        tx.send(Ok(())).await?;
-                    }
-                    Err(err) => {
-                        warn!(?err, "failed to apply log level override");
-                        tx.send(Err(RemoteError::AuthError(err.to_string())))
-                            .await?;
-                    }
                 }
             }
             ClientHostMessage::FetchLogs(msg) => {
@@ -146,14 +168,28 @@ impl ClientHost {
                     let _ = tx
                         .send(Err(RemoteError::MissingCapability(needed_caps)))
                         .await;
-                } else if let Some(collector) = self.log_collector.clone() {
-                    stream_current_log_file(collector, inner, tx).await;
                 } else {
-                    let _ = tx
-                        .send(Err(RemoteError::AuthError(
-                            "log collection is not enabled on this client".into(),
-                        )))
-                        .await;
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let Some(collector) = self.log_collector.clone() {
+                        stream_current_log_file(collector, inner, tx).await;
+                    } else {
+                        let _ = tx
+                            .send(Err(RemoteError::AuthError(
+                                "log collection is not enabled on this client".into(),
+                            )))
+                            .await;
+                    }
+                    // The file logger is native-only; on wasm there is no
+                    // log file to stream.
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        let _ = inner;
+                        let _ = tx
+                            .send(Err(RemoteError::AuthError(
+                                "log collection is not available on this client".into(),
+                            )))
+                            .await;
+                    }
                 }
             }
         }
@@ -201,6 +237,7 @@ async fn send_missing_caps<T>(
 /// Chunk size for streaming the rolling file back. 64 KiB is large enough
 /// to amortize the round-trip overhead and small enough that a tight
 /// `max_bytes` clamp still produces granular cut-off points.
+#[cfg(not(target_arch = "wasm32"))]
 const FETCH_LOGS_CHUNK_BYTES: usize = 64 * 1024;
 
 /// Open the collector's currently-active rolling file and stream it back
@@ -208,6 +245,7 @@ const FETCH_LOGS_CHUNK_BYTES: usize = 64 * 1024;
 /// `request.max_bytes` is reached. Errors during read are reported as a
 /// terminal `Err` chunk; the receiver should treat the stream's end as
 /// success.
+#[cfg(not(target_arch = "wasm32"))]
 async fn stream_current_log_file(
     collector: LogCollector,
     request: FetchLogs,

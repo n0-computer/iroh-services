@@ -67,6 +67,7 @@ pub struct ClientBuilder {
     metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
+    #[cfg(not(target_arch = "wasm32"))]
     log_collector: Option<crate::logs::LogCollector>,
 }
 
@@ -83,6 +84,7 @@ impl ClientBuilder {
             metrics_interval: Some(Duration::from_secs(60)),
             remote: None,
             registry,
+            #[cfg(not(target_arch = "wasm32"))]
             log_collector: None,
         }
     }
@@ -95,6 +97,7 @@ impl ClientBuilder {
     /// The collector handle is also what
     /// [`crate::ClientHost::with_log_collector`] uses to apply
     /// dashboard-triggered overrides, so it's typically the same one.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_log_collector(mut self, collector: crate::logs::LogCollector) -> Self {
         self.log_collector = Some(collector);
         self
@@ -238,6 +241,7 @@ impl ClientBuilder {
                 name: self.name.clone(),
                 session_id,
                 authorized: false,
+                #[cfg(not(target_arch = "wasm32"))]
                 log_collector: self.log_collector,
             }
             .run(self.name, self.registry, self.metrics_interval, rx),
@@ -458,6 +462,7 @@ struct ClientActor {
     name: Option<String>,
     session_id: Uuid,
     authorized: bool,
+    #[cfg(not(target_arch = "wasm32"))]
     log_collector: Option<crate::logs::LogCollector>,
 }
 
@@ -562,7 +567,9 @@ impl ClientActor {
         // on file for this endpoint and apply it locally. Best-effort —
         // a failure here logs but does not block authentication. The
         // dashboard-triggered live override path still works
-        // independently for in-session changes.
+        // independently for in-session changes. Native-only: the file
+        // logger (and thus the collector) doesn't exist on wasm.
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(collector) = self.log_collector.as_ref() {
             match self.client.rpc(crate::protocol::GetLogLevel).await {
                 Ok(Ok(Some(settings))) => {
