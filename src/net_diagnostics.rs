@@ -9,7 +9,7 @@
 //! performed here is the port-mapping protocol availability check.
 use std::net::SocketAddr;
 
-use iroh::NetReport;
+use iroh::unstable_net_report::NetReport;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
