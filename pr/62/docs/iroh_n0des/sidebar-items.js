@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"mod":["api_secret","caps","protocol"],"struct":["Client","ClientBuilder","PublishedTicket","Registry"]};
