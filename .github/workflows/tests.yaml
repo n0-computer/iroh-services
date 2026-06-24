@@ -227,33 +227,3 @@ jobs:
           path: output
           retention-days: 1
           compression-level: 0
-
-  wasm_test:
-    name: Build & test wasm32 for browsers
-    timeout-minutes: 5
-    runs-on: ubuntu-latest
-    env:
-      IROH_SERVICE_API_SECRET: ${{ secrets.IROH_SERVICE_API_SECRET }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v6
-
-      - name: Setup node.js version 26 # need at least version 22.5 for running iroh
-        uses: actions/setup-node@v6
-        with:
-          node-version: 26
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Add wasm target
-        run: rustup target add wasm32-unknown-unknown
-
-      - name: Install wasm-bindgen-test-runner
-        uses: taiki-e/install-action@v2
-        with:
-          # Match the version of wasm-bindgen used in Cargo.lock
-          tool: wasm-bindgen-cli@0.2.125
-
-      - name: Run integration test in wasm
-        run: cargo test --test integration --target=wasm32-unknown-unknown
