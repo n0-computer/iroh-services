@@ -47,9 +47,9 @@ impl ClientHost {
     #[tracing::instrument(skip_all, fields(remote = %connection.remote_id().fmt_short()))]
     async fn handle_connection(&self, connection: Connection) -> Result<()> {
         let remote_node_id = connection.remote_id();
-        debug!("incoming svc connction");
+        debug!("incoming svc connection");
         let Some(first_request) = read_request::<ClientHostProtocol>(&connection).await? else {
-            debug!("closing svc connction: no request received");
+            debug!("closing svc connection: no request received");
             return Ok(());
         };
 
