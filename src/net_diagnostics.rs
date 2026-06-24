@@ -76,7 +76,7 @@ pub mod checks {
         let direct_addrs: Vec<SocketAddr> = addr.ip_addrs().copied().collect();
 
         // 4. Port mapping probe (the one thing NetReport doesn't include)
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(wasm_browser))]
         let portmap_probe =
             match n0_future::time::timeout(Duration::from_secs(5), probe_port_mapping()).await {
                 Ok(Ok(p)) => Some(p),
@@ -92,7 +92,7 @@ pub mod checks {
 
         // TODO: setting `portmap_probe` to `None` makes svc fail to parse the report.
         // Should be fixed there, but this works too for now.
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(wasm_browser)]
         let portmap_probe = Some(PortMapProbe {
             upnp: false,
             pcp: false,
@@ -109,7 +109,7 @@ pub mod checks {
         })
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(wasm_browser))]
     async fn probe_port_mapping() -> Result<PortMapProbe> {
         let config = portmapper::Config {
             enable_upnp: true,
