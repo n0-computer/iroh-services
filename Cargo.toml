@@ -53,8 +53,14 @@ cfg_aliases = "0.2.1"
 
 [dev-dependencies]
 rand = { version = "0.10", features = ["chacha"] }
+n0-error = { version = "1.0.0", features = ["anyhow"] }
+
+[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dev-dependencies]
 temp_env_vars = "0.2.1"
 tokio = { version = "1.45", features = ["macros", "rt", "rt-multi-thread", "signal"] }
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3.75"
 
 
 [features]
@@ -62,3 +68,7 @@ default = []
 
 [[example]]
 name = "net_diagnostics"
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
