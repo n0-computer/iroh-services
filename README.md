@@ -10,6 +10,44 @@
 
 An iroh protocol to interact with iroh-services, using iroh itself.
 
+## Usage
+
+Connect an existing iroh endpoint to iroh-services with an API key from your
+project's dashboard. The client then pushes endpoint metrics on an interval:
+
+```rust
+use iroh::{Endpoint, endpoint::presets};
+use iroh_services::Client;
+
+let endpoint = Endpoint::bind(presets::N0).await?;
+let client = Client::builder(&endpoint)
+    .api_secret_from_env()?
+    .name("my-endpoint")?
+    .build()
+    .await?;
+```
+
+See the [`quickstart`](examples/quickstart.rs) example for a runnable version,
+and [docs.rs](https://docs.rs/iroh-services) for the full API.
+
+### Network diagnostics
+
+To let iroh-services fetch a connectivity report from an endpoint on demand,
+grant it the `NetDiagnosticsCap::GetAny` capability and accept
+`CLIENT_HOST_ALPN` on your router so it can dial back:
+
+```rust
+use iroh::protocol::Router;
+use iroh_services::{ClientHost, CLIENT_HOST_ALPN};
+
+let router = Router::builder(endpoint.clone())
+    .accept(CLIENT_HOST_ALPN, ClientHost::new(&endpoint))
+    .spawn();
+```
+
+The [`net_diagnostics`](examples/net_diagnostics.rs) example shows the full
+flow, including granting the capability.
+
 ## License
 
 Copyright 2026 N0, INC.
