@@ -8,7 +8,7 @@ use irpc::WithChannels;
 use irpc_iroh::read_request;
 use n0_error::AnyError;
 use rcan::{Capability, CapabilityOrigin, Rcan};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::{
     caps::{Caps, NetDiagnosticsCap},
@@ -54,7 +54,7 @@ impl ClientHost {
         };
 
         let NetDiagnosticsMessage::Auth(WithChannels { inner, tx, .. }) = first_request else {
-            info!("closing svc connection: Expected initial auth message");
+            debug!("closing svc connection: Expected initial auth message");
             connection.close(400u32.into(), b"Expected initial auth message");
             return Ok(());
         };
