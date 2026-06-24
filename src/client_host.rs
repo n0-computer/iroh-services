@@ -92,10 +92,11 @@ impl ClientHost {
 
                 let report =
                     crate::net_diagnostics::checks::run_diagnostics(&self.endpoint).await?;
+                debug!(?report, "created network diagnostics report");
                 tx.send(Ok(report))
                     .await
                     .inspect_err(|e| warn!("sending network diagnostics response: {:?}", e))?;
-                info!("network diagnostics report sent");
+                debug!("network diagnostics report sent");
             }
         }
 
