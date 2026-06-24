@@ -35,10 +35,9 @@ pub struct PortMapProbe {
 pub mod checks {
     use std::net::SocketAddr;
 
-    use n0_future::time::Duration;
-
     use anyhow::Result;
     use iroh::{Endpoint, Watcher};
+    use n0_future::time::Duration;
 
     use super::*;
 
