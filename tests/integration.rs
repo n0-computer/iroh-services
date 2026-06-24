@@ -6,11 +6,17 @@ use n0_error::{Result, StdResultExt};
 
 #[cfg(not(wasm_browser))]
 use tokio::test;
+use tracing_subscriber::EnvFilter;
 #[cfg(wasm_browser)]
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 #[test]
 async fn main_integration_test() -> Result {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_str(env!("RUST_LOG")).anyerr()?)
+        .without_time()
+        .init();
+
     let secret = ApiSecret::from_str(env!("IROH_SERVICES_API_SECRET"))?;
 
     let preset = preset().api_secret(secret.clone()).build()?;

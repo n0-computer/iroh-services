@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 5
     runs-on: ubuntu-latest
     env:
-      RUST_BACKTRACE: 1
+      RUST_LOG: iroh_services=trace
       IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
     steps:
       - name: Checkout sources
