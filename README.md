@@ -1,5 +1,13 @@
 # iroh-services
 
+[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square)](https://docs.rs/iroh-services/)
+[![Crates.io](https://img.shields.io/crates/v/iroh-services.svg?style=flat-square)](https://crates.io/crates/iroh-services)
+[![downloads](https://img.shields.io/crates/d/iroh-services.svg?style=flat-square)](https://crates.io/crates/iroh-services)
+[![Chat](https://img.shields.io/discord/1161119546170687619?logo=discord&style=flat-square)](https://discord.com/invite/DpmJgtU7cW)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE-MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](LICENSE-APACHE)
+[![CI](https://img.shields.io/github/actions/workflow/status/n0-computer/iroh-services/ci.yaml?branch=main&style=flat-square&label=CI)](https://github.com/n0-computer/iroh-services/actions/workflows/ci.yaml)
+
 An iroh protocol to interact with iroh-services, using iroh itself.
 
 ## License
