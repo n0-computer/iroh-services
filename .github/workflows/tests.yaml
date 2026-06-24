@@ -52,6 +52,7 @@ jobs:
       # Using self-hosted runners so use local cache for sccache and
       # not SCCACHE_GHA_ENABLED.
       RUSTC_WRAPPER: "sccache"
+      IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
     steps:
     - name: Checkout
       uses: actions/checkout@v6
@@ -159,6 +160,7 @@ jobs:
       # Using self-hosted runners so use local cache for sccache and
       # not SCCACHE_GHA_ENABLED.
       RUSTC_WRAPPER: "sccache"
+      IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
     steps:
     - name: Checkout
       uses: actions/checkout@v6

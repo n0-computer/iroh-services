@@ -3,7 +3,6 @@ use std::str::FromStr;
 use iroh::{Endpoint, protocol::Router};
 use iroh_services::{ApiSecret, Client, caps::NetDiagnosticsCap, preset};
 use n0_error::{Result, StdResultExt};
-
 #[cfg(not(wasm_browser))]
 use tokio::test;
 use tracing_subscriber::EnvFilter;
@@ -12,12 +11,17 @@ use wasm_bindgen_test::wasm_bindgen_test as test;
 
 #[test]
 async fn main_integration_test() -> Result {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_str(env!("RUST_LOG")).anyerr()?)
-        .without_time()
-        .init();
+    if let Some(env) = option_env!("RUST_LOG") {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_str(env).anyerr()?)
+            .without_time()
+            .init();
+    }
 
-    let secret = ApiSecret::from_str(env!("IROH_SERVICES_API_SECRET"))?;
+    let Some(secret) = option_env!("IROH_SERVICES_API_SECRET") else {
+        n0_error::bail_any!("Missing IROH_SERVICES_API_SECRET env var");
+    };
+    let secret = ApiSecret::from_str(secret)?;
 
     let preset = preset().api_secret(secret.clone()).build()?;
     let endpoint = Endpoint::bind(preset).await?;
