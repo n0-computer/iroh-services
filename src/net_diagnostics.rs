@@ -33,7 +33,9 @@ pub struct PortMapProbe {
 }
 
 pub mod checks {
-    use std::{net::SocketAddr, time::Duration};
+    use std::net::SocketAddr;
+
+    use n0_future::time::Duration;
 
     use anyhow::Result;
     use iroh::{Endpoint, Watcher};
@@ -53,7 +55,7 @@ pub mod checks {
         let endpoint_id = endpoint.id();
 
         // 1. Wait for relay connection
-        if tokio::time::timeout(timeout, endpoint.online())
+        if n0_future::time::timeout(timeout, endpoint.online())
             .await
             .is_err()
         {
@@ -62,7 +64,7 @@ pub mod checks {
 
         // 2. Net report (includes relay latencies and UDP connectivity)
         let mut watcher = endpoint.net_report();
-        let net_report = match tokio::time::timeout(timeout, watcher.initialized()).await {
+        let net_report = match n0_future::time::timeout(timeout, watcher.initialized()).await {
             Ok(report) => Some(report),
             Err(_) => {
                 tracing::warn!("net report timed out after {timeout:?}, using partial data");
@@ -77,7 +79,7 @@ pub mod checks {
         // 4. Port mapping probe (the one thing NetReport doesn't include)
         #[cfg(not(target_arch = "wasm32"))]
         let portmap_probe =
-            match tokio::time::timeout(Duration::from_secs(5), probe_port_mapping()).await {
+            match n0_future::time::timeout(Duration::from_secs(5), probe_port_mapping()).await {
                 Ok(Ok(p)) => Some(p),
                 Ok(Err(e)) => {
                     tracing::warn!("portmap probe failed: {e}");
