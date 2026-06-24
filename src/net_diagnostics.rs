@@ -90,8 +90,15 @@ pub mod checks {
                     None
                 }
             };
+
+        // TODO: setting `portmap_probe` to `None` makes svc fail to parse the report.
+        // Should be fixed there, but this works too for now.
         #[cfg(target_arch = "wasm32")]
-        let portmap_probe = None;
+        let portmap_probe = Some(PortMapProbe {
+            upnp: false,
+            pcp: false,
+            nat_pmp: false,
+        });
 
         Ok(DiagnosticsReport {
             endpoint_id,
