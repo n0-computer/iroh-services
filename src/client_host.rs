@@ -8,7 +8,7 @@ use irpc::WithChannels;
 use irpc_iroh::read_request;
 use n0_error::AnyError;
 use rcan::{Capability, CapabilityOrigin, Rcan};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     caps::{Caps, NetDiagnosticsCap},
@@ -28,7 +28,9 @@ pub struct ClientHost {
 
 impl ProtocolHandler for ClientHost {
     async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+        let remote_id = connection.remote_id();
         self.handle_connection(connection).await.map_err(|e| {
+            debug!(remote=%remote_id.fmt_short(), "svc connection closed with error: {e:#}");
             let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
             AcceptError::from(AnyError::from(boxed))
         })
@@ -42,14 +44,17 @@ impl ClientHost {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(remote = %connection.remote_id().fmt_short()))]
     async fn handle_connection(&self, connection: Connection) -> Result<()> {
         let remote_node_id = connection.remote_id();
+        debug!("incoming svc connction");
         let Some(first_request) = read_request::<ClientHostProtocol>(&connection).await? else {
+            debug!("closing svc connction: no request received");
             return Ok(());
         };
 
         let NetDiagnosticsMessage::Auth(WithChannels { inner, tx, .. }) = first_request else {
-            debug!(remote_node_id = %remote_node_id.fmt_short(), "Expected initial auth message");
+            info!("closing svc connection: Expected initial auth message");
             connection.close(400u32.into(), b"Expected initial auth message");
             return Ok(());
         };
@@ -65,6 +70,7 @@ impl ClientHost {
                 return Ok(());
             }
         }
+        debug!("svc connection is authenticated");
 
         // Read exactly one RunNetworkDiagnostics request
         let Some(request) = read_request::<ClientHostProtocol>(&connection).await? else {
@@ -77,6 +83,7 @@ impl ClientHost {
                 anyhow::bail!("unexpected auth message");
             }
             NetDiagnosticsMessage::RunNetworkDiagnostics(msg) => {
+                debug!("received network diagnostics request");
                 let WithChannels { tx, .. } = msg;
                 let needed_caps = Caps::new([NetDiagnosticsCap::GetAny]);
                 if !capability.permits(&needed_caps) {
@@ -88,10 +95,12 @@ impl ClientHost {
                 tx.send(Ok(report))
                     .await
                     .inspect_err(|e| warn!("sending network diagnostics response: {:?}", e))?;
+                info!("network diagnostics report sent");
             }
         }
 
         connection.closed().await;
+        debug!("connection closed");
         Ok(())
     }
 }
