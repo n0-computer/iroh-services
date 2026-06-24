@@ -52,7 +52,6 @@ jobs:
       # Using self-hosted runners so use local cache for sccache and
       # not SCCACHE_GHA_ENABLED.
       RUSTC_WRAPPER: "sccache"
-      IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
     steps:
     - name: Checkout
       uses: actions/checkout@v6
@@ -120,6 +119,7 @@ jobs:
       env:
         RUST_LOG: ${{ runner.debug && 'TRACE' || 'DEBUG'}}
         NEXTEST_EXPERIMENTAL_LIBTEST_JSON: 1
+        IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
 
     - name: upload results
       if: ${{ failure() && inputs.flaky }}
@@ -160,7 +160,6 @@ jobs:
       # Using self-hosted runners so use local cache for sccache and
       # not SCCACHE_GHA_ENABLED.
       RUSTC_WRAPPER: "sccache"
-      IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
     steps:
     - name: Checkout
       uses: actions/checkout@v6
@@ -220,6 +219,7 @@ jobs:
       env:
         RUST_LOG: ${{ runner.debug && 'TRACE' || 'DEBUG'}}
         NEXTEST_EXPERIMENTAL_LIBTEST_JSON: 1
+        IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
 
     - name: upload results
       if: ${{ failure() && inputs.flaky }}

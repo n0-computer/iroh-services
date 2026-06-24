@@ -13,9 +13,6 @@ jobs:
     name: Build & test wasm32 for browsers
     timeout-minutes: 5
     runs-on: ubuntu-latest
-    env:
-      RUST_LOG: iroh_services=trace
-      IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@v6
@@ -39,3 +36,6 @@ jobs:
 
       - name: Run integration test in wasm
         run: cargo test --test integration --target=wasm32-unknown-unknown
+        env:
+          RUST_LOG: iroh_services=trace
+          IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
