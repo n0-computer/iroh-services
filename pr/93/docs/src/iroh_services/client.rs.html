@@ -162,14 +162,14 @@
 <a href=#162 id=162 data-nosnippet>162</a>    <span class="doccomment">/// Loads the private ssh key from the given path, and creates the needed capability.
 <a href=#163 id=163 data-nosnippet>163</a>    ///
 <a href=#164 id=164 data-nosnippet>164</a>    /// The file must contain an unencrypted PEM-encoded OpenSSH ed25519 private key.
-<a href=#165 id=165 data-nosnippet>165</a>    </span><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#165 id=165 data-nosnippet>165</a>    </span><span class="attr">#[cfg(not(wasm_browser))]
 <a href=#166 id=166 data-nosnippet>166</a>    </span><span class="kw">pub async fn </span>ssh_key_from_file&lt;P: AsRef&lt;std::path::Path&gt;&gt;(<span class="self">self</span>, path: P) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
 <a href=#167 id=167 data-nosnippet>167</a>        <span class="kw">let </span>file_content = tokio::fs::read_to_string(path).<span class="kw">await</span><span class="question-mark">?</span>;
 <a href=#168 id=168 data-nosnippet>168</a>        <span class="self">self</span>.ssh_key(<span class="kw-2">&amp;</span>file_content)
 <a href=#169 id=169 data-nosnippet>169</a>    }
 <a href=#170 id=170 data-nosnippet>170</a>
 <a href=#171 id=171 data-nosnippet>171</a>    <span class="doccomment">/// Creates the capability from the provided PEM-encoded OpenSSH ed25519 private key.
-<a href=#172 id=172 data-nosnippet>172</a>    </span><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#172 id=172 data-nosnippet>172</a>    </span><span class="attr">#[cfg(not(wasm_browser))]
 <a href=#173 id=173 data-nosnippet>173</a>    </span><span class="kw">pub fn </span>ssh_key(<span class="kw-2">mut </span><span class="self">self</span>, pem: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
 <a href=#174 id=174 data-nosnippet>174</a>        <span class="kw">let </span>local_id = <span class="self">self</span>.endpoint.id();
 <a href=#175 id=175 data-nosnippet>175</a>        <span class="kw">let </span>rcan = <span class="kw">crate</span>::caps::create_api_token_from_openssh_pem(

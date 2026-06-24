@@ -76,7 +76,7 @@
 <a href=#76 id=76 data-nosnippet>76</a>        <span class="kw">let </span>direct_addrs: Vec&lt;SocketAddr&gt; = addr.ip_addrs().copied().collect();
 <a href=#77 id=77 data-nosnippet>77</a>
 <a href=#78 id=78 data-nosnippet>78</a>        <span class="comment">// 4. Port mapping probe (the one thing NetReport doesn't include)
-<a href=#79 id=79 data-nosnippet>79</a>        </span><span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#79 id=79 data-nosnippet>79</a>        </span><span class="attr">#[cfg(not(wasm_browser))]
 <a href=#80 id=80 data-nosnippet>80</a>        </span><span class="kw">let </span>portmap_probe =
 <a href=#81 id=81 data-nosnippet>81</a>            <span class="kw">match </span>n0_future::time::timeout(Duration::from_secs(<span class="number">5</span>), probe_port_mapping()).<span class="kw">await </span>{
 <a href=#82 id=82 data-nosnippet>82</a>                <span class="prelude-val">Ok</span>(<span class="prelude-val">Ok</span>(p)) =&gt; <span class="prelude-val">Some</span>(p),
@@ -92,7 +92,7 @@
 <a href=#92 id=92 data-nosnippet>92</a>
 <a href=#93 id=93 data-nosnippet>93</a>        <span class="comment">// TODO: setting `portmap_probe` to `None` makes svc fail to parse the report.
 <a href=#94 id=94 data-nosnippet>94</a>        // Should be fixed there, but this works too for now.
-<a href=#95 id=95 data-nosnippet>95</a>        </span><span class="attr">#[cfg(target_arch = <span class="string">"wasm32"</span>)]
+<a href=#95 id=95 data-nosnippet>95</a>        </span><span class="attr">#[cfg(wasm_browser)]
 <a href=#96 id=96 data-nosnippet>96</a>        </span><span class="kw">let </span>portmap_probe = <span class="prelude-val">Some</span>(PortMapProbe {
 <a href=#97 id=97 data-nosnippet>97</a>            upnp: <span class="bool-val">false</span>,
 <a href=#98 id=98 data-nosnippet>98</a>            pcp: <span class="bool-val">false</span>,
@@ -109,7 +109,7 @@
 <a href=#109 id=109 data-nosnippet>109</a>        })
 <a href=#110 id=110 data-nosnippet>110</a>    }
 <a href=#111 id=111 data-nosnippet>111</a>
-<a href=#112 id=112 data-nosnippet>112</a>    <span class="attr">#[cfg(not(target_arch = <span class="string">"wasm32"</span>))]
+<a href=#112 id=112 data-nosnippet>112</a>    <span class="attr">#[cfg(not(wasm_browser))]
 <a href=#113 id=113 data-nosnippet>113</a>    </span><span class="kw">async fn </span>probe_port_mapping() -&gt; <span class="prelude-ty">Result</span>&lt;PortMapProbe&gt; {
 <a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>config = portmapper::Config {
 <a href=#115 id=115 data-nosnippet>115</a>            enable_upnp: <span class="bool-val">true</span>,
