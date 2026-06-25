@@ -107,8 +107,6 @@ jobs:
     - name: build tests
       run: |
         cargo nextest run --workspace ${{ env.FEATURES }} --lib --bins --tests --no-run
-      env:
-        IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
 
     - name: list ignored tests
       run: |
@@ -209,8 +207,6 @@ jobs:
     - name: build tests
       run: |
         cargo nextest run --workspace ${{ env.FEATURES }} --lib --bins --tests --target ${{ matrix.target }} --no-run
-      env:
-        IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
 
     - name: list ignored tests
       run: |

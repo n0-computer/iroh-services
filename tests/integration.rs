@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
 use iroh::{Endpoint, protocol::Router};
+#[cfg(not(wasm_browser))]
+use iroh_services::API_SECRET_ENV_VAR_NAME;
 use iroh_services::{ApiSecret, Client, caps::NetDiagnosticsCap, preset};
 use n0_error::{Result, StdResultExt};
 #[cfg(not(wasm_browser))]
@@ -18,10 +20,10 @@ async fn main_integration_test() -> Result {
             .init();
     }
 
-    let Some(secret) = option_env!("IROH_SERVICES_API_SECRET") else {
-        n0_error::bail_any!("Missing IROH_SERVICES_API_SECRET env var");
-    };
-    let secret = ApiSecret::from_str(secret)?;
+    #[cfg(wasm_browser)]
+    let secret = ApiSecret::from_str(option_env!("IROH_SERVICES_API_SECRET").unwrap())?;
+    #[cfg(not(wasm_browser))]
+    let secret = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
 
     let preset = preset().api_secret(secret.clone()).build()?;
     let endpoint = Endpoint::bind(preset).await?;
