@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use iroh::{Endpoint, protocol::Router};
+use iroh::{Endpoint, RelayMode, address_lookup::PkarrResolver, protocol::Router};
 #[cfg(not(wasm_browser))]
 use iroh_services::API_SECRET_ENV_VAR_NAME;
 use iroh_services::{ApiSecret, Client, caps::NetDiagnosticsCap, preset};
@@ -26,7 +26,18 @@ async fn main_integration_test() -> Result {
     let secret = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
 
     let preset = preset().api_secret(secret.clone()).build()?;
-    let endpoint = Endpoint::bind(preset).await?;
+    let endpoint = Endpoint::builder(preset)
+        // force production relays to overwrite IROH_FORCE_STAGING_RELAYS from the workflow,
+        // because our API secret is for production iroh-services, which is connected to
+        // production iroh relays.
+        .relay_mode(RelayMode::Custom(iroh::defaults::prod::default_relay_map()))
+        .address_lookup(PkarrResolver::builder(
+            iroh::address_lookup::pkarr::N0_DNS_PKARR_RELAY_PROD
+                .parse()
+                .anyerr()?,
+        ))
+        .bind()
+        .await?;
     let services = Client::builder(&endpoint)
         .api_secret(secret.clone())?
         .name(format!("iroh-services integration-rs {}", env!("TARGET")))?
