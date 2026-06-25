@@ -25,6 +25,7 @@ jobs:
     name: CI Test Suite
     if: "github.event_name != 'pull_request' || ! contains(github.event.pull_request.labels.*.name, 'flaky-test')"
     uses: "./.github/workflows/tests.yaml"
+    secrets: inherit
 
   cross_build:
     name: Cross Build Only
