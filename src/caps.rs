@@ -294,7 +294,7 @@ impl<C: Capability + Ord> Capability for CapSet<C> {
 
 /// Create an rcan token for the api access from a PEM-encoded OpenSSH ed25519
 /// private key.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(wasm_browser))]
 pub fn create_api_token_from_openssh_pem(
     pem: &str,
     local_id: EndpointId,

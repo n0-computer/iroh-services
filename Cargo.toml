@@ -40,20 +40,27 @@ futures-buffered = "0.2.12"
 postcard = { version = "1.1.3", features = ["use-std"] }
 rand = "0.10.1"
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 base64 = "0.22"
 portmapper = "0.19"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [build-dependencies]
 built = { version = "0.8", features = ["cargo-lock"] }
+cfg_aliases = "0.2.1"
 
 [dev-dependencies]
 rand = { version = "0.10", features = ["chacha"] }
+n0-error = { version = "1.0.0", features = ["anyhow"] }
+
+[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dev-dependencies]
 temp_env_vars = "0.2.1"
 tokio = { version = "1.45", features = ["macros", "rt", "rt-multi-thread", "signal"] }
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3.75"
 
 
 [features]
@@ -61,3 +68,7 @@ default = []
 
 [[example]]
 name = "net_diagnostics"
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"

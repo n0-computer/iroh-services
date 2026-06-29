@@ -162,14 +162,14 @@ impl ClientBuilder {
     /// Loads the private ssh key from the given path, and creates the needed capability.
     ///
     /// The file must contain an unencrypted PEM-encoded OpenSSH ed25519 private key.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(wasm_browser))]
     pub async fn ssh_key_from_file<P: AsRef<std::path::Path>>(self, path: P) -> Result<Self> {
         let file_content = tokio::fs::read_to_string(path).await?;
         self.ssh_key(&file_content)
     }
 
     /// Creates the capability from the provided PEM-encoded OpenSSH ed25519 private key.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(wasm_browser))]
     pub fn ssh_key(mut self, pem: &str) -> Result<Self> {
         let local_id = self.endpoint.id();
         let rcan = crate::caps::create_api_token_from_openssh_pem(

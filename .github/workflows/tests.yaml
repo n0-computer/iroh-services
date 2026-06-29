@@ -119,6 +119,7 @@ jobs:
       env:
         RUST_LOG: ${{ runner.debug && 'TRACE' || 'DEBUG'}}
         NEXTEST_EXPERIMENTAL_LIBTEST_JSON: 1
+        IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
 
     - name: upload results
       if: ${{ failure() && inputs.flaky }}
@@ -218,6 +219,7 @@ jobs:
       env:
         RUST_LOG: ${{ runner.debug && 'TRACE' || 'DEBUG'}}
         NEXTEST_EXPERIMENTAL_LIBTEST_JSON: 1
+        IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
 
     - name: upload results
       if: ${{ failure() && inputs.flaky }}

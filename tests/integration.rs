@@ -1,0 +1,82 @@
+use std::str::FromStr;
+
+use iroh::{Endpoint, RelayMode, address_lookup::PkarrResolver, protocol::Router};
+#[cfg(not(wasm_browser))]
+use iroh_services::API_SECRET_ENV_VAR_NAME;
+use iroh_services::{ApiSecret, Client, caps::NetDiagnosticsCap, preset};
+use n0_error::{Result, StdResultExt};
+#[cfg(not(wasm_browser))]
+use tokio::test;
+use tracing_subscriber::EnvFilter;
+#[cfg(wasm_browser)]
+use wasm_bindgen_test::wasm_bindgen_test as test;
+
+#[test]
+async fn main_integration_test() -> Result {
+    if let Some(env) = option_env!("RUST_LOG") {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_str(env).anyerr()?)
+            .without_time()
+            .init();
+    }
+
+    #[cfg(wasm_browser)]
+    let secret = ApiSecret::from_str(option_env!("IROH_SERVICES_API_SECRET").unwrap())?;
+    #[cfg(not(wasm_browser))]
+    let secret = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
+
+    let preset = preset().api_secret(secret.clone()).build()?;
+    let endpoint = Endpoint::builder(preset)
+        // force production relays to overwrite IROH_FORCE_STAGING_RELAYS from the workflow,
+        // because our API secret is for production iroh-services, which is connected to
+        // production iroh relays.
+        .relay_mode(RelayMode::Custom(iroh::defaults::prod::default_relay_map()))
+        .address_lookup(PkarrResolver::builder(
+            iroh::address_lookup::pkarr::N0_DNS_PKARR_RELAY_PROD
+                .parse()
+                .anyerr()?,
+        ))
+        .bind()
+        .await?;
+    let services = Client::builder(&endpoint)
+        .api_secret(secret.clone())?
+        .name(format!("iroh-services integration-rs {}", env!("TARGET")))?
+        .build()
+        .await
+        .std_context("failed building iroh-services client")?;
+
+    services
+        .grant_capability(secret.addr().id, vec![NetDiagnosticsCap::GetAny])
+        .await
+        .std_context("failed granting net diagnostics capability")?;
+
+    let host = iroh_services::ClientHost::new(&endpoint);
+
+    let router = Router::builder(endpoint.clone())
+        .accept(iroh_services::CLIENT_HOST_ALPN, host)
+        .spawn();
+
+    endpoint.online().await;
+
+    services
+        .ping()
+        .await
+        .std_context("iroh-services ping failed")?;
+
+    services
+        .push_metrics()
+        .await
+        .std_context("iroh-services metrics upload failed")?;
+
+    services
+        .net_diagnostics(true)
+        .await
+        .std_context("iroh-services net diagnostics with upload failed")?;
+
+    router
+        .shutdown()
+        .await
+        .std_context("failed to shutdown endpoint")?; // will also shut down the endpoint
+
+    Ok(())
+}
