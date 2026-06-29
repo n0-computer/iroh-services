@@ -16,6 +16,7 @@ pub type IrohServicesClient = irpc::Client<IrohServicesProtocol>;
 #[rpc_requests(message = ServicesMessage)]
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
+#[non_exhaustive]
 pub enum IrohServicesProtocol {
     #[rpc(tx=oneshot::Sender<()>)]
     Auth(Auth),
@@ -54,15 +55,22 @@ pub enum ClientHostProtocol {
 pub type RemoteResult<T> = Result<T, RemoteError>;
 
 #[derive(Clone, Serialize, Deserialize, thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum RemoteError {
+    // The first three variants and their order are the v1 wire contract: postcard
+    // encodes enum variants by index, so a v1 client only decodes these and at
+    // their original positions. New variants MUST be appended after them, and the
+    // server must only send new variants in response to new (v2+) requests.
     #[error("Missing capability: {}", _0.to_strings().join(", "))]
     MissingCapability(Caps),
     #[error("Unauthorized: {}", _0)]
     AuthError(String),
-    #[error("Invalid input: {}", _0)]
-    InvalidInput(String),
     #[error("Internal server error")]
     InternalServerError,
+    #[error("Invalid input: {}", _0)]
+    InvalidInput(String),
+    #[error("Rate limit exceeded")]
+    RateLimited,
 }
 
 /// Authentication on first request
@@ -125,4 +133,66 @@ pub struct SetGroup {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SetAttributes {
     pub attributes: BTreeMap<String, String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::{RemoteError, SetAttributes, SetGroup};
+    use crate::client::CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH;
+
+    #[test]
+    fn test_remote_error_wire_compat() {
+        // postcard encodes enum variants by their index. v1 clients only know
+        // the first three RemoteError variants, so these indices are a frozen
+        // wire contract; new variants must be appended after them.
+        let idx = |e: &RemoteError| postcard::to_stdvec(e).expect("encode")[0];
+        assert_eq!(idx(&RemoteError::AuthError(String::new())), 1);
+        assert_eq!(idx(&RemoteError::InternalServerError), 2);
+        // v2+ variants, appended after the v1 set.
+        assert_eq!(idx(&RemoteError::InvalidInput(String::new())), 3);
+        assert_eq!(idx(&RemoteError::RateLimited), 4);
+    }
+
+    // The wire format used by irpc (and elsewhere in this crate, see
+    // `api_secret.rs`) is postcard. These round-trips pin the on-the-wire
+    // contract these messages share with the server.
+
+    #[test]
+    fn test_set_group_serde_roundtrip() {
+        // a normal group, plus a unicode group for good measure
+        for group in ["staging", "my-group 👋"] {
+            let msg = SetGroup {
+                group: group.to_string(),
+            };
+            let bytes = postcard::to_stdvec(&msg).expect("postcard serialize");
+            let decoded: SetGroup = postcard::from_bytes(&bytes).expect("postcard deserialize");
+            assert_eq!(decoded.group, msg.group);
+        }
+    }
+
+    #[test]
+    fn test_set_attributes_serde_roundtrip() {
+        // empty map: the documented "clear" case
+        let empty = SetAttributes {
+            attributes: BTreeMap::new(),
+        };
+        let bytes = postcard::to_stdvec(&empty).expect("postcard serialize");
+        let decoded: SetAttributes = postcard::from_bytes(&bytes).expect("postcard deserialize");
+        assert!(decoded.attributes.is_empty());
+        assert_eq!(decoded.attributes, empty.attributes);
+
+        // unicode key/value plus a value at exactly the documented max length
+        let mut attributes = BTreeMap::new();
+        attributes.insert("région 🌍".to_string(), "us-wëst 🚀".to_string());
+        let max_value = "x".repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+        assert_eq!(max_value.len(), CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+        attributes.insert("max".to_string(), max_value);
+
+        let msg = SetAttributes { attributes };
+        let bytes = postcard::to_stdvec(&msg).expect("postcard serialize");
+        let decoded: SetAttributes = postcard::from_bytes(&bytes).expect("postcard deserialize");
+        assert_eq!(decoded.attributes, msg.attributes);
+    }
 }

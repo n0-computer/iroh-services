@@ -458,6 +458,22 @@ impl Client {
         set_attributes_inner(self.message_channel.clone(), collected).await
     }
 
+    /// Set (or replace) a single attribute, merging it into the endpoint's
+    /// existing attributes rather than replacing the whole set. Insertion
+    /// order is preserved — re-setting an existing key keeps its position.
+    /// Convenience over [`set_attributes`](Self::set_attributes) when you only
+    /// need to change one value.
+    ///
+    /// The key follows endpoint-name rules (2–128 bytes) and the value is
+    /// limited to 128 bytes.
+    pub async fn set_attribute(
+        &self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<(), Error> {
+        set_attribute_inner(self.message_channel.clone(), key.into(), value.into()).await
+    }
+
     /// Pings the remote node.
     pub async fn ping(&self) -> Result<Pong, Error> {
         let (tx, rx) = oneshot::channel();
@@ -570,6 +586,11 @@ enum ClientActorMessage {
         attributes: BTreeMap<String, String>,
         done: oneshot::Sender<Result<(), RemoteError>>,
     },
+    SetAttribute {
+        key: String,
+        value: String,
+        done: oneshot::Sender<Result<(), RemoteError>>,
+    },
 }
 
 struct ClientActor {
@@ -663,6 +684,16 @@ impl ClientActor {
                             let res = self.send_set_attributes(attributes).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to set attributes: {:#?}", err);
+                            }
+                        }
+                        ClientActorMessage::SetAttribute{ key, value, done } => {
+                            // Merge into the current set, preserving insertion
+                            // order (re-setting an existing key keeps its slot).
+                            let mut merged = self.attributes.clone();
+                            merged.insert(key, value);
+                            let res = self.send_set_attributes(merged).await;
+                            if let Err(err) = done.send(res) {
+                                warn!("failed to set attribute: {:#?}", err);
                             }
                         }
                         ClientActorMessage::PutNetworkDiagnostics{ report, done } => {
@@ -865,6 +896,31 @@ async fn set_attributes_inner(
         .map_err(Error::Remote)
 }
 
+async fn set_attribute_inner(
+    message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
+    key: String,
+    value: String,
+) -> Result<(), Error> {
+    // Validate the single entry the same way the full map is validated (key is
+    // name-shaped, value within the size limit). The merged-total count is
+    // enforced server-side.
+    let mut one = BTreeMap::new();
+    one.insert(key.clone(), value.clone());
+    validate_attributes(&one)?;
+    let (tx, rx) = oneshot::channel();
+    message_channel
+        .send(ClientActorMessage::SetAttribute {
+            key,
+            value,
+            done: tx,
+        })
+        .await
+        .map_err(|_| Error::Other(anyhow!("sending set attribute request")))?;
+    rx.await
+        .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+        .map_err(Error::Remote)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -878,8 +934,9 @@ mod tests {
         api_secret::ApiSecret,
         caps::{Cap, Caps},
         client::{
-            API_SECRET_ENV_VAR_NAME, BuildError, CLIENT_ATTRIBUTES_MAX_COUNT,
-            ValidateAttributesError, ValidateNameError,
+            API_SECRET_ENV_VAR_NAME, BuildError, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH,
+            CLIENT_ATTRIBUTES_MAX_COUNT, CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError,
+            ValidateNameError,
         },
     };
 
@@ -1066,5 +1123,153 @@ mod tests {
                 ValidateAttributesError::TooManyEntries
             ))
         ));
+    }
+
+    /// Build a client with no reachable server, mirroring `test_no_metrics_interval`.
+    /// The runtime setters validate input locally before any network call, so
+    /// validation errors surface without a live server.
+    async fn build_serverless_client(seed: u64) -> Client {
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(seed);
+        let shared_secret = SecretKey::from_bytes(&rng.random());
+        let fake_endpoint_id = SecretKey::from_bytes(&rng.random()).public();
+        let api_secret = ApiSecret::new(shared_secret, fake_endpoint_id);
+
+        let endpoint = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+
+        Client::builder(&endpoint)
+            .disable_metrics_interval()
+            .api_secret(api_secret)
+            .unwrap()
+            .build()
+            .await
+            .unwrap()
+    }
+
+    /// Covers the runtime `Client::set_group` path the builder tests miss:
+    /// validation runs locally and returns `Error::InvalidGroup` without a server.
+    #[tokio::test]
+    async fn test_set_group_runtime_validation() {
+        let client = build_serverless_client(2).await;
+
+        let err = client
+            .set_group("a")
+            .await
+            .expect_err("too-short group should fail validation");
+        assert!(matches!(
+            err,
+            Error::InvalidGroup(ValidateNameError::TooShort)
+        ));
+
+        let too_long = "x".repeat(CLIENT_NAME_MAX_LENGTH + 1);
+        let err = client
+            .set_group(too_long)
+            .await
+            .expect_err("too-long group should fail validation");
+        assert!(matches!(
+            err,
+            Error::InvalidGroup(ValidateNameError::TooLong)
+        ));
+    }
+
+    /// Covers the runtime `Client::set_attributes` path the builder tests miss:
+    /// validation runs locally and returns `Error::InvalidAttributes` without a server.
+    #[tokio::test]
+    async fn test_set_attributes_runtime_validation() {
+        let client = build_serverless_client(3).await;
+
+        // key under 2 bytes
+        let err = client
+            .set_attributes([("a", "v")])
+            .await
+            .expect_err("too-short attribute key should fail validation");
+        assert!(matches!(
+            err,
+            Error::InvalidAttributes(ValidateAttributesError::InvalidKey(
+                ValidateNameError::TooShort
+            ))
+        ));
+
+        // value over the max length
+        let too_long_value = "x".repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH + 1);
+        let err = client
+            .set_attributes([("ok", too_long_value.as_str())])
+            .await
+            .expect_err("too-long attribute value should fail validation");
+        assert!(matches!(
+            err,
+            Error::InvalidAttributes(ValidateAttributesError::ValueTooLong)
+        ));
+
+        // more entries than allowed
+        let big: Vec<(String, String)> = (0..(CLIENT_ATTRIBUTES_MAX_COUNT + 1))
+            .map(|i| (format!("key_{i:04}"), format!("val_{i}")))
+            .collect();
+        let err = client
+            .set_attributes(big)
+            .await
+            .expect_err("too many attributes should fail validation");
+        assert!(matches!(
+            err,
+            Error::InvalidAttributes(ValidateAttributesError::TooManyEntries)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_set_attribute_runtime_validation() {
+        let client = build_serverless_client(7).await;
+
+        // A bad single key is rejected before any network call.
+        let err = client
+            .set_attribute("a", "v")
+            .await
+            .expect_err("too-short attribute key should fail validation");
+        assert!(matches!(
+            err,
+            Error::InvalidAttributes(ValidateAttributesError::InvalidKey(
+                ValidateNameError::TooShort
+            ))
+        ));
+
+        // A valid single attribute passes validation, then reaches the remote
+        // layer (no server) and surfaces a remote error — proving set_attribute
+        // is wired through the actor/RPC path.
+        let err = client
+            .set_attribute("firmware", "2.1.0")
+            .await
+            .expect_err("no server: remote call must fail after validation passes");
+        assert!(matches!(err, Error::Remote(_)), "got {err:?}");
+    }
+
+    /// Boundary "accepted" case for the runtime setter. Without a live server we
+    /// cannot assert success; instead we assert the input passes local validation
+    /// and the call proceeds to the (failing) remote layer, surfacing
+    /// `Error::Remote` rather than an `Error::InvalidAttributes` validation error.
+    #[tokio::test]
+    async fn test_set_attributes_runtime_boundary_accepted() {
+        let client = build_serverless_client(4).await;
+
+        // value of exactly the max length is accepted by validation
+        let max_value = "x".repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+        let err = client
+            .set_attributes([("ok".to_string(), max_value)])
+            .await
+            .expect_err("no server: remote call must fail after validation passes");
+        assert!(
+            matches!(err, Error::Remote(_)),
+            "expected a remote error (validation accepted), got {err:?}"
+        );
+
+        // exactly CLIENT_ATTRIBUTES_MAX_COUNT entries is accepted by validation
+        let max_entries: Vec<(String, String)> = (0..CLIENT_ATTRIBUTES_MAX_COUNT)
+            .map(|i| (format!("key_{i:04}"), format!("val_{i}")))
+            .collect();
+        let err = client
+            .set_attributes(max_entries)
+            .await
+            .expect_err("no server: remote call must fail after validation passes");
+        assert!(
+            matches!(err, Error::Remote(_)),
+            "expected a remote error (validation accepted), got {err:?}"
+        );
     }
 }

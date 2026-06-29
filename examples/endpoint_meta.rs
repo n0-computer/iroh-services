@@ -6,6 +6,8 @@
 //! updated later through the `Client::set_*` methods.
 //!
 //! Run with: `IROH_SERVICES_API_SECRET=... cargo run --example endpoint_meta`
+use std::time::Duration;
+
 use iroh::{Endpoint, endpoint::presets};
 use iroh_services::Client;
 
@@ -15,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
 
     let endpoint = Endpoint::bind(presets::N0).await?;
 
-    // Derive a unique name from the endpoint id so repeated runs don't collide
+    //> Derive a unique name from the endpoint id so repeated runs don't collide
     // in dashboards. In a real app this is typically a user id, machine name,
     // or other stable identifier from your application.
     let id = endpoint.id().to_string();
@@ -25,32 +27,35 @@ async fn main() -> anyhow::Result<()> {
     // immediately after authenticating with iroh-services. Validation errors
     // (e.g. name too long) surface here; transport errors during startup are
     // logged at `warn` level rather than failing the build.
+    let mut attrs = vec![];
+    for i in 0..25 {
+        attrs.push((format!("my-thing: {i}"), i.to_string()));
+    }
     let client = Client::builder(&endpoint)
         .api_secret_from_env()?
         .name(name)?
-        .group("examples")?
-        .attributes([
-            ("env", "dev"),
-            ("region", "us-west"),
-            ("role", "endpoint-meta-example"),
-        ])?
+        .group("staging")?
+        .attributes(attrs)?
         .build()
         .await?;
 
     client.ping().await?;
     println!("endpoint registered with initial metadata");
 
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    println!("updating endpoint metadata...");
+
     // Each metadata field can also be updated after construction. These calls
     // return explicit errors, unlike the builder which logs and continues.
     client.set_name("endpoint-meta-example-renamed").await?;
-    client.set_group("staging").await?;
+    client.set_group("production").await?;
 
     // set_attributes fully replaces the prior set on each call. Pass an empty
     // iterator to clear all attributes.
-    client
-        .set_attributes([("env", "staging"), ("region", "eu-central")])
-        .await?;
+    client.set_attribute("version", "41.0.3").await?;
 
     println!("metadata updated");
+    endpoint.close().await;
+
     Ok(())
 }
