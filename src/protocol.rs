@@ -59,6 +59,8 @@ pub enum RemoteError {
     MissingCapability(Caps),
     #[error("Unauthorized: {}", _0)]
     AuthError(String),
+    #[error("Invalid input: {}", _0)]
+    InvalidInput(String),
     #[error("Internal server error")]
     InternalServerError,
 }
