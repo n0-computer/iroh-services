@@ -135,49 +135,48 @@
 <a href=#135 id=135 data-nosnippet>135</a></span><span class="kw">mod </span>tests {
 <a href=#136 id=136 data-nosnippet>136</a>    <span class="kw">use </span>std::collections::BTreeMap;
 <a href=#137 id=137 data-nosnippet>137</a>
-<a href=#138 id=138 data-nosnippet>138</a>    <span class="kw">use </span><span class="kw">crate</span>::client::CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH;
-<a href=#139 id=139 data-nosnippet>139</a>
-<a href=#140 id=140 data-nosnippet>140</a>    <span class="kw">use </span>super::{SetAttributes, SetGroup};
-<a href=#141 id=141 data-nosnippet>141</a>
-<a href=#142 id=142 data-nosnippet>142</a>    <span class="comment">// The wire format used by irpc (and elsewhere in this crate, see
-<a href=#143 id=143 data-nosnippet>143</a>    // `api_secret.rs`) is postcard. These round-trips pin the on-the-wire
-<a href=#144 id=144 data-nosnippet>144</a>    // contract these messages share with the server.
-<a href=#145 id=145 data-nosnippet>145</a>
-<a href=#146 id=146 data-nosnippet>146</a>    </span><span class="attr">#[test]
-<a href=#147 id=147 data-nosnippet>147</a>    </span><span class="kw">fn </span>test_set_group_serde_roundtrip() {
-<a href=#148 id=148 data-nosnippet>148</a>        <span class="comment">// a normal group, plus a unicode group for good measure
-<a href=#149 id=149 data-nosnippet>149</a>        </span><span class="kw">for </span>group <span class="kw">in </span>[<span class="string">"staging"</span>, <span class="string">"my-group 👋"</span>] {
-<a href=#150 id=150 data-nosnippet>150</a>            <span class="kw">let </span>msg = SetGroup {
-<a href=#151 id=151 data-nosnippet>151</a>                group: group.to_string(),
-<a href=#152 id=152 data-nosnippet>152</a>            };
-<a href=#153 id=153 data-nosnippet>153</a>            <span class="kw">let </span>bytes = postcard::to_stdvec(<span class="kw-2">&amp;</span>msg).expect(<span class="string">"postcard serialize"</span>);
-<a href=#154 id=154 data-nosnippet>154</a>            <span class="kw">let </span>decoded: SetGroup = postcard::from_bytes(<span class="kw-2">&amp;</span>bytes).expect(<span class="string">"postcard deserialize"</span>);
-<a href=#155 id=155 data-nosnippet>155</a>            <span class="macro">assert_eq!</span>(decoded.group, msg.group);
-<a href=#156 id=156 data-nosnippet>156</a>        }
-<a href=#157 id=157 data-nosnippet>157</a>    }
-<a href=#158 id=158 data-nosnippet>158</a>
-<a href=#159 id=159 data-nosnippet>159</a>    <span class="attr">#[test]
-<a href=#160 id=160 data-nosnippet>160</a>    </span><span class="kw">fn </span>test_set_attributes_serde_roundtrip() {
-<a href=#161 id=161 data-nosnippet>161</a>        <span class="comment">// empty map: the documented "clear" case
-<a href=#162 id=162 data-nosnippet>162</a>        </span><span class="kw">let </span>empty = SetAttributes {
-<a href=#163 id=163 data-nosnippet>163</a>            attributes: BTreeMap::new(),
-<a href=#164 id=164 data-nosnippet>164</a>        };
-<a href=#165 id=165 data-nosnippet>165</a>        <span class="kw">let </span>bytes = postcard::to_stdvec(<span class="kw-2">&amp;</span>empty).expect(<span class="string">"postcard serialize"</span>);
-<a href=#166 id=166 data-nosnippet>166</a>        <span class="kw">let </span>decoded: SetAttributes = postcard::from_bytes(<span class="kw-2">&amp;</span>bytes).expect(<span class="string">"postcard deserialize"</span>);
-<a href=#167 id=167 data-nosnippet>167</a>        <span class="macro">assert!</span>(decoded.attributes.is_empty());
-<a href=#168 id=168 data-nosnippet>168</a>        <span class="macro">assert_eq!</span>(decoded.attributes, empty.attributes);
-<a href=#169 id=169 data-nosnippet>169</a>
-<a href=#170 id=170 data-nosnippet>170</a>        <span class="comment">// unicode key/value plus a value at exactly the documented max length
-<a href=#171 id=171 data-nosnippet>171</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>attributes = BTreeMap::new();
-<a href=#172 id=172 data-nosnippet>172</a>        attributes.insert(<span class="string">"région 🌍"</span>.to_string(), <span class="string">"us-wëst 🚀"</span>.to_string());
-<a href=#173 id=173 data-nosnippet>173</a>        <span class="kw">let </span>max_value = <span class="string">"x"</span>.repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
-<a href=#174 id=174 data-nosnippet>174</a>        <span class="macro">assert_eq!</span>(max_value.len(), CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
-<a href=#175 id=175 data-nosnippet>175</a>        attributes.insert(<span class="string">"max"</span>.to_string(), max_value);
-<a href=#176 id=176 data-nosnippet>176</a>
-<a href=#177 id=177 data-nosnippet>177</a>        <span class="kw">let </span>msg = SetAttributes { attributes };
-<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span>bytes = postcard::to_stdvec(<span class="kw-2">&amp;</span>msg).expect(<span class="string">"postcard serialize"</span>);
-<a href=#179 id=179 data-nosnippet>179</a>        <span class="kw">let </span>decoded: SetAttributes = postcard::from_bytes(<span class="kw-2">&amp;</span>bytes).expect(<span class="string">"postcard deserialize"</span>);
-<a href=#180 id=180 data-nosnippet>180</a>        <span class="macro">assert_eq!</span>(decoded.attributes, msg.attributes);
-<a href=#181 id=181 data-nosnippet>181</a>    }
-<a href=#182 id=182 data-nosnippet>182</a>}
+<a href=#138 id=138 data-nosnippet>138</a>    <span class="kw">use </span>super::{SetAttributes, SetGroup};
+<a href=#139 id=139 data-nosnippet>139</a>    <span class="kw">use </span><span class="kw">crate</span>::client::CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH;
+<a href=#140 id=140 data-nosnippet>140</a>
+<a href=#141 id=141 data-nosnippet>141</a>    <span class="comment">// The wire format used by irpc (and elsewhere in this crate, see
+<a href=#142 id=142 data-nosnippet>142</a>    // `api_secret.rs`) is postcard. These round-trips pin the on-the-wire
+<a href=#143 id=143 data-nosnippet>143</a>    // contract these messages share with the server.
+<a href=#144 id=144 data-nosnippet>144</a>
+<a href=#145 id=145 data-nosnippet>145</a>    </span><span class="attr">#[test]
+<a href=#146 id=146 data-nosnippet>146</a>    </span><span class="kw">fn </span>test_set_group_serde_roundtrip() {
+<a href=#147 id=147 data-nosnippet>147</a>        <span class="comment">// a normal group, plus a unicode group for good measure
+<a href=#148 id=148 data-nosnippet>148</a>        </span><span class="kw">for </span>group <span class="kw">in </span>[<span class="string">"staging"</span>, <span class="string">"my-group 👋"</span>] {
+<a href=#149 id=149 data-nosnippet>149</a>            <span class="kw">let </span>msg = SetGroup {
+<a href=#150 id=150 data-nosnippet>150</a>                group: group.to_string(),
+<a href=#151 id=151 data-nosnippet>151</a>            };
+<a href=#152 id=152 data-nosnippet>152</a>            <span class="kw">let </span>bytes = postcard::to_stdvec(<span class="kw-2">&amp;</span>msg).expect(<span class="string">"postcard serialize"</span>);
+<a href=#153 id=153 data-nosnippet>153</a>            <span class="kw">let </span>decoded: SetGroup = postcard::from_bytes(<span class="kw-2">&amp;</span>bytes).expect(<span class="string">"postcard deserialize"</span>);
+<a href=#154 id=154 data-nosnippet>154</a>            <span class="macro">assert_eq!</span>(decoded.group, msg.group);
+<a href=#155 id=155 data-nosnippet>155</a>        }
+<a href=#156 id=156 data-nosnippet>156</a>    }
+<a href=#157 id=157 data-nosnippet>157</a>
+<a href=#158 id=158 data-nosnippet>158</a>    <span class="attr">#[test]
+<a href=#159 id=159 data-nosnippet>159</a>    </span><span class="kw">fn </span>test_set_attributes_serde_roundtrip() {
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="comment">// empty map: the documented "clear" case
+<a href=#161 id=161 data-nosnippet>161</a>        </span><span class="kw">let </span>empty = SetAttributes {
+<a href=#162 id=162 data-nosnippet>162</a>            attributes: BTreeMap::new(),
+<a href=#163 id=163 data-nosnippet>163</a>        };
+<a href=#164 id=164 data-nosnippet>164</a>        <span class="kw">let </span>bytes = postcard::to_stdvec(<span class="kw-2">&amp;</span>empty).expect(<span class="string">"postcard serialize"</span>);
+<a href=#165 id=165 data-nosnippet>165</a>        <span class="kw">let </span>decoded: SetAttributes = postcard::from_bytes(<span class="kw-2">&amp;</span>bytes).expect(<span class="string">"postcard deserialize"</span>);
+<a href=#166 id=166 data-nosnippet>166</a>        <span class="macro">assert!</span>(decoded.attributes.is_empty());
+<a href=#167 id=167 data-nosnippet>167</a>        <span class="macro">assert_eq!</span>(decoded.attributes, empty.attributes);
+<a href=#168 id=168 data-nosnippet>168</a>
+<a href=#169 id=169 data-nosnippet>169</a>        <span class="comment">// unicode key/value plus a value at exactly the documented max length
+<a href=#170 id=170 data-nosnippet>170</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>attributes = BTreeMap::new();
+<a href=#171 id=171 data-nosnippet>171</a>        attributes.insert(<span class="string">"région 🌍"</span>.to_string(), <span class="string">"us-wëst 🚀"</span>.to_string());
+<a href=#172 id=172 data-nosnippet>172</a>        <span class="kw">let </span>max_value = <span class="string">"x"</span>.repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+<a href=#173 id=173 data-nosnippet>173</a>        <span class="macro">assert_eq!</span>(max_value.len(), CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+<a href=#174 id=174 data-nosnippet>174</a>        attributes.insert(<span class="string">"max"</span>.to_string(), max_value);
+<a href=#175 id=175 data-nosnippet>175</a>
+<a href=#176 id=176 data-nosnippet>176</a>        <span class="kw">let </span>msg = SetAttributes { attributes };
+<a href=#177 id=177 data-nosnippet>177</a>        <span class="kw">let </span>bytes = postcard::to_stdvec(<span class="kw-2">&amp;</span>msg).expect(<span class="string">"postcard serialize"</span>);
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="kw">let </span>decoded: SetAttributes = postcard::from_bytes(<span class="kw-2">&amp;</span>bytes).expect(<span class="string">"postcard deserialize"</span>);
+<a href=#179 id=179 data-nosnippet>179</a>        <span class="macro">assert_eq!</span>(decoded.attributes, msg.attributes);
+<a href=#180 id=180 data-nosnippet>180</a>    }
+<a href=#181 id=181 data-nosnippet>181</a>}
 </code></pre></div></section></main></body></html>
