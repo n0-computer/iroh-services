@@ -28,7 +28,7 @@ minimum 2 bytes, maximum 128 bytes. <strong>group uniqueness is not enforced.</s
     K: <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;,
     V: <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;,</div></h4></section></summary><div class="docblock"><p>Replace the arbitrary key-value attributes on the active endpoint cloud-side.</p>
 <p>Accepts any iterable of <code>(key, value)</code> pairs (arrays of tuples, <code>Vec</code>s,
-<code>HashMap</code>s, <code>IndexMap</code>s, etc.), so most calls fit on a single line:</p>
+<code>HashMap</code>s, <code>BTreeMap</code>s, etc.), so most calls fit on a single line:</p>
 
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code>client
     .set_attributes([(<span class="string">"env"</span>, <span class="string">"prod"</span>), (<span class="string">"region"</span>, <span class="string">"us-west"</span>)])
