@@ -112,20 +112,17 @@ impl ClientBuilder {
         self
     }
 
-    /// Set an optional human-readable name for the endpoint the client is
-    /// constructed with, making metrics from this endpoint easier to identify.
-    /// This is often used for associating with other services in your app,
-    /// like a database user id, machine name, permanent username, etc.
+    /// Set an optional human-readable name for the endpoint, making its metrics
+    /// easier to identify.
     ///
-    /// When this builder method is called, the provided name is sent after the
-    /// client initially authenticates the endpoint server-side.
-    /// Errors will not interrupt client construction, instead producing a
-    /// warn-level log. For explicit error handling, use [`Client::set_name`].
+    /// Often a database user id, machine name, or other stable identifier from
+    /// your application. A name must be 2–128 bytes of UTF-8; uniqueness is not
+    /// enforced, so different endpoints may share a name.
     ///
-    /// names can be any UTF-8 string, with a min length of 2 bytes, and
-    /// maximum length of 128 bytes. **name uniqueness is not enforced
-    /// server-side**, which means using the same name for different endpoints
-    /// will not produce an error
+    /// Validation errors are returned here. The name is sent to the server after
+    /// the client authenticates; a failure to send it at that point is logged at
+    /// warn level rather than returned — use [`Client::set_name`] to set it later
+    /// with explicit error handling.
     pub fn name(mut self, name: impl Into<String>) -> Result<Self> {
         let name = name.into();
         validate_name(&name).map_err(BuildError::InvalidName)?;
@@ -134,9 +131,13 @@ impl ClientBuilder {
     }
 
     /// Attach the endpoint to a single named group when the client first
-    /// authenticates. Group names follow the same rules as endpoint names
-    /// (2–128 bytes UTF-8). Errors during startup propagate as warn-level
-    /// logs; for explicit error handling use [`Client::set_group`].
+    /// authenticates.
+    ///
+    /// A group name must be 2–128 bytes of UTF-8. Validation errors are returned
+    /// here. The group is sent to the server after the client authenticates; a
+    /// failure to send it at that point is logged at warn level rather than
+    /// returned — use [`Client::set_group`] to set it later with explicit error
+    /// handling.
     pub fn group(mut self, group: impl Into<String>) -> Result<Self> {
         let group = group.into();
         validate_name(&group).map_err(BuildError::InvalidGroup)?;
@@ -155,10 +156,12 @@ impl ClientBuilder {
     /// # Ok(()) }
     /// ```
     ///
-    /// Keys follow the same length rules as endpoint names (2–128 bytes);
-    /// values may be empty and are capped at 128 bytes; the map is limited
-    /// to 128 entries. Errors during startup propagate as warn-level logs;
-    /// for explicit error handling use [`Client::set_attributes`].
+    /// Each key must be 2–128 bytes of UTF-8; values may be empty and are capped
+    /// at 128 bytes; at most 128 entries are allowed. Validation errors are
+    /// returned here. The attributes are sent to the server after the client
+    /// authenticates; a failure to send them at that point is logged at warn
+    /// level rather than returned — use [`Client::set_attributes`] to set them
+    /// later with explicit error handling.
     pub fn attributes<I, K, V>(mut self, attrs: I) -> Result<Self>
     where
         I: IntoIterator<Item = (K, V)>,
@@ -267,14 +270,7 @@ impl ClientBuilder {
                 session_id: Uuid::new_v4(),
                 authorized: false,
             }
-            .run(
-                self.name,
-                self.group,
-                self.attributes,
-                self.registry,
-                self.metrics_interval,
-                rx,
-            ),
+            .run(self.registry, self.metrics_interval, rx),
         ));
 
         Ok(Client {
@@ -411,6 +407,18 @@ impl Client {
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))
     }
 
+    /// Read the current endpoint group from the local client.
+    pub async fn group(&self) -> Result<Option<String>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::ReadGroup { done: tx })
+            .await
+            .map_err(|_| Error::Other(anyhow!("sending group read request")))?;
+
+        rx.await
+            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))
+    }
+
     /// Name the active endpoint cloud-side.
     ///
     /// names can be any UTF-8 string, with a min length of 2 bytes, and
@@ -421,8 +429,7 @@ impl Client {
 
     /// Attach the active endpoint to a single named group cloud-side.
     ///
-    /// Group names follow the same rules as endpoint names: any UTF-8 string,
-    /// minimum 2 bytes, maximum 128 bytes. **group uniqueness is not enforced.**
+    /// A group name must be 2–128 bytes of UTF-8.
     pub async fn set_group(&self, group: impl Into<String>) -> Result<(), Error> {
         set_group_inner(self.message_channel.clone(), group.into()).await
     }
@@ -441,10 +448,9 @@ impl Client {
     /// # Ok(()) }
     /// ```
     ///
-    /// Keys follow the same rules as endpoint names (2–128 bytes). Values may
-    /// be empty and are limited to 128 bytes. The map is limited to 128
-    /// entries. Each call fully replaces the prior set; passing an empty
-    /// iterator clears all attributes.
+    /// Each key must be 2–128 bytes of UTF-8; values may be empty and are limited
+    /// to 128 bytes; at most 128 entries are allowed. Each call fully replaces
+    /// the prior set; passing an empty iterator clears all attributes.
     pub async fn set_attributes<I, K, V>(&self, attrs: I) -> Result<(), Error>
     where
         I: IntoIterator<Item = (K, V)>,
@@ -458,14 +464,12 @@ impl Client {
         set_attributes_inner(self.message_channel.clone(), collected).await
     }
 
-    /// Set (or replace) a single attribute, merging it into the endpoint's
-    /// existing attributes rather than replacing the whole set. Insertion
-    /// order is preserved — re-setting an existing key keeps its position.
-    /// Convenience over [`set_attributes`](Self::set_attributes) when you only
-    /// need to change one value.
+    /// Set or replace a single attribute, merging it into the endpoint's existing
+    /// attributes rather than replacing the whole set.
     ///
-    /// The key follows endpoint-name rules (2–128 bytes) and the value is
-    /// limited to 128 bytes.
+    /// A convenience over [`set_attributes`](Self::set_attributes) when you only
+    /// need to change one value. The key must be 2–128 bytes of UTF-8 and the
+    /// value is limited to 128 bytes; the merged set must stay within 128 entries.
     pub async fn set_attribute(
         &self,
         key: impl Into<String>,
@@ -574,6 +578,9 @@ enum ClientActorMessage {
     ReadName {
         done: oneshot::Sender<Option<String>>,
     },
+    ReadGroup {
+        done: oneshot::Sender<Option<String>>,
+    },
     NameEndpoint {
         name: String,
         done: oneshot::Sender<Result<(), RemoteError>>,
@@ -589,7 +596,10 @@ enum ClientActorMessage {
     SetAttribute {
         key: String,
         value: String,
-        done: oneshot::Sender<Result<(), RemoteError>>,
+        // Carries the full client `Error` (not just `RemoteError`) because the
+        // merged-set validation happens in the actor, where the current set is
+        // known, and can fail with a local `InvalidAttributes` error.
+        done: oneshot::Sender<Result<(), Error>>,
     },
 }
 
@@ -606,9 +616,6 @@ struct ClientActor {
 impl ClientActor {
     async fn run(
         mut self,
-        initial_name: Option<String>,
-        initial_group: Option<String>,
-        initial_attributes: Option<BTreeMap<String, String>>,
         registry: Registry,
         interval: Option<Duration>,
         mut inbox: tokio::sync::mpsc::Receiver<ClientActorMessage>,
@@ -618,20 +625,22 @@ impl ClientActor {
         let mut metrics_timer = interval.map(|interval| n0_future::time::interval(interval));
         trace!("starting client actor");
 
-        if let Some(name) = initial_name
+        // Send the initial metadata (set via the builder) once the actor starts.
+        // These live on `self`; a send failure here is logged, not fatal.
+        if let Some(name) = self.name.clone()
             && let Err(err) = self.send_name_endpoint(name).await
         {
             warn!(err = %err, "failed setting endpoint name on startup");
         }
 
-        if let Some(group) = initial_group
+        if let Some(group) = self.group.clone()
             && let Err(err) = self.send_set_group(group).await
         {
             warn!(err = %err, "failed setting endpoint group on startup");
         }
 
-        if let Some(attributes) = initial_attributes
-            && let Err(err) = self.send_set_attributes(attributes).await
+        if !self.attributes.is_empty()
+            && let Err(err) = self.send_set_attributes(self.attributes.clone()).await
         {
             warn!(err = %err, "failed setting endpoint attributes on startup");
         }
@@ -668,6 +677,11 @@ impl ClientActor {
                                 warn!("sending name value: {:#?}", err);
                             }
                         }
+                        ClientActorMessage::ReadGroup{ done } => {
+                            if let Err(err) = done.send(self.group.clone()) {
+                                warn!("sending group value: {:#?}", err);
+                            }
+                        }
                         ClientActorMessage::NameEndpoint{ name, done } => {
                             let res = self.send_name_endpoint(name).await;
                             if let Err(err) = done.send(res) {
@@ -687,11 +701,18 @@ impl ClientActor {
                             }
                         }
                         ClientActorMessage::SetAttribute{ key, value, done } => {
-                            // Merge into the current set, preserving insertion
-                            // order (re-setting an existing key keeps its slot).
+                            // Merge into the current set and validate the union:
+                            // adding one valid entry to a valid set can still
+                            // exceed the max entry count, so the single entry
+                            // being valid is not enough.
                             let mut merged = self.attributes.clone();
                             merged.insert(key, value);
-                            let res = self.send_set_attributes(merged).await;
+                            let res = match validate_attributes(&merged) {
+                                Ok(()) => {
+                                    self.send_set_attributes(merged).await.map_err(Error::Remote)
+                                }
+                                Err(err) => Err(Error::from(err)),
+                            };
                             if let Err(err) = done.send(res) {
                                 warn!("failed to set attribute: {:#?}", err);
                             }
@@ -866,7 +887,7 @@ async fn set_group_inner(
     group: String,
 ) -> Result<(), Error> {
     validate_name(&group).map_err(Error::InvalidGroup)?;
-    debug!(group_len = group.len(), "calling set group");
+    debug!(%group, "calling set group");
     let (tx, rx) = oneshot::channel();
     message_channel
         .send(ClientActorMessage::SetGroup { group, done: tx })
@@ -901,12 +922,9 @@ async fn set_attribute_inner(
     key: String,
     value: String,
 ) -> Result<(), Error> {
-    // Validate the single entry the same way the full map is validated (key is
-    // name-shaped, value within the size limit). The merged-total count is
-    // enforced server-side.
-    let mut one = BTreeMap::new();
-    one.insert(key.clone(), value.clone());
-    validate_attributes(&one)?;
+    // Validation happens in the actor against the merged set (current attributes
+    // plus this entry), since only there is the current set known — merging can
+    // exceed the entry-count limit even when this single entry is valid.
     let (tx, rx) = oneshot::channel();
     message_channel
         .send(ClientActorMessage::SetAttribute {
@@ -918,7 +936,6 @@ async fn set_attribute_inner(
         .map_err(|_| Error::Other(anyhow!("sending set attribute request")))?;
     rx.await
         .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
-        .map_err(Error::Remote)
 }
 
 #[cfg(test)]
@@ -1238,6 +1255,44 @@ mod tests {
             .await
             .expect_err("no server: remote call must fail after validation passes");
         assert!(matches!(err, Error::Remote(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn test_set_attribute_merge_over_limit_rejected() {
+        // A client already holding the maximum number of attributes.
+        let full: Vec<(String, String)> = (0..CLIENT_ATTRIBUTES_MAX_COUNT)
+            .map(|i| (format!("key_{i:04}"), "v".to_string()))
+            .collect();
+
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(9);
+        let shared_secret = SecretKey::from_bytes(&rng.random());
+        let fake_endpoint_id = SecretKey::from_bytes(&rng.random()).public();
+        let api_secret = ApiSecret::new(shared_secret, fake_endpoint_id);
+        let endpoint = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+        let client = Client::builder(&endpoint)
+            .disable_metrics_interval()
+            .attributes(full)
+            .unwrap()
+            .api_secret(api_secret)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+
+        // Merging one more (individually valid) entry pushes the set over the
+        // limit. The single-entry check would miss this; the merged-set check in
+        // the actor catches it locally, before any network call.
+        let err = client
+            .set_attribute("one-too-many", "v")
+            .await
+            .expect_err("merging past the attribute limit must fail");
+        assert!(
+            matches!(
+                err,
+                Error::InvalidAttributes(ValidateAttributesError::TooManyEntries)
+            ),
+            "expected TooManyEntries, got {err:?}"
+        );
     }
 
     /// Boundary "accepted" case for the runtime setter. Without a live server we
