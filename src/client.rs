@@ -116,12 +116,12 @@ impl ClientBuilder {
     /// easier to identify.
     ///
     /// Often a database user id, machine name, or other stable identifier from
-    /// your application. A name must be 2–128 bytes of UTF-8; uniqueness is not
+    /// your application. A name must be 2 to 128 bytes of UTF-8; uniqueness is not
     /// enforced, so different endpoints may share a name.
     ///
     /// Validation errors are returned here. The name is sent to the server after
     /// the client authenticates; a failure to send it at that point is logged at
-    /// warn level rather than returned — use [`Client::set_name`] to set it later
+    /// warn level rather than returned; use [`Client::set_name`] to set it later
     /// with explicit error handling.
     pub fn name(mut self, name: impl Into<String>) -> Result<Self> {
         let name = name.into();
@@ -133,10 +133,10 @@ impl ClientBuilder {
     /// Attach the endpoint to a single named group when the client first
     /// authenticates.
     ///
-    /// A group name must be 2–128 bytes of UTF-8. Validation errors are returned
+    /// A group name must be 2 to 128 bytes of UTF-8. Validation errors are returned
     /// here. The group is sent to the server after the client authenticates; a
     /// failure to send it at that point is logged at warn level rather than
-    /// returned — use [`Client::set_group`] to set it later with explicit error
+    /// returned; use [`Client::set_group`] to set it later with explicit error
     /// handling.
     pub fn group(mut self, group: impl Into<String>) -> Result<Self> {
         let group = group.into();
@@ -156,11 +156,11 @@ impl ClientBuilder {
     /// # Ok(()) }
     /// ```
     ///
-    /// Each key must be 2–128 bytes of UTF-8; values may be empty and are capped
+    /// Each key must be 2 to 128 bytes of UTF-8; values may be empty and are capped
     /// at 128 bytes; at most 128 entries are allowed. Validation errors are
     /// returned here. The attributes are sent to the server after the client
     /// authenticates; a failure to send them at that point is logged at warn
-    /// level rather than returned — use [`Client::set_attributes`] to set them
+    /// level rather than returned; use [`Client::set_attributes`] to set them
     /// later with explicit error handling.
     pub fn attributes<I, K, V>(mut self, attrs: I) -> Result<Self>
     where
@@ -327,9 +327,9 @@ pub const CLIENT_NAME_MAX_LENGTH: usize = 128;
 /// Error returned when an endpoint name fails validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ValidateNameError {
-    #[error("Name is too long (must be no more than {CLIENT_NAME_MAX_LENGTH} characters).")]
+    #[error("Name is too long (must be no more than {CLIENT_NAME_MAX_LENGTH} bytes).")]
     TooLong,
-    #[error("Name is too short (must be at least {CLIENT_NAME_MIN_LENGTH} characters).")]
+    #[error("Name is too short (must be at least {CLIENT_NAME_MIN_LENGTH} bytes).")]
     TooShort,
 }
 
@@ -429,7 +429,7 @@ impl Client {
 
     /// Attach the active endpoint to a single named group cloud-side.
     ///
-    /// A group name must be 2–128 bytes of UTF-8.
+    /// A group name must be 2 to 128 bytes of UTF-8.
     pub async fn set_group(&self, group: impl Into<String>) -> Result<(), Error> {
         set_group_inner(self.message_channel.clone(), group.into()).await
     }
@@ -448,7 +448,7 @@ impl Client {
     /// # Ok(()) }
     /// ```
     ///
-    /// Each key must be 2–128 bytes of UTF-8; values may be empty and are limited
+    /// Each key must be 2 to 128 bytes of UTF-8; values may be empty and are limited
     /// to 128 bytes; at most 128 entries are allowed. Each call fully replaces
     /// the prior set; passing an empty iterator clears all attributes.
     pub async fn set_attributes<I, K, V>(&self, attrs: I) -> Result<(), Error>
@@ -468,7 +468,7 @@ impl Client {
     /// attributes rather than replacing the whole set.
     ///
     /// A convenience over [`set_attributes`](Self::set_attributes) when you only
-    /// need to change one value. The key must be 2–128 bytes of UTF-8 and the
+    /// need to change one value. The key must be 2 to 128 bytes of UTF-8 and the
     /// value is limited to 128 bytes; the merged set must stay within 128 entries.
     pub async fn set_attribute(
         &self,
@@ -923,7 +923,7 @@ async fn set_attribute_inner(
     value: String,
 ) -> Result<(), Error> {
     // Validation happens in the actor against the merged set (current attributes
-    // plus this entry), since only there is the current set known — merging can
+    // plus this entry), since only there is the current set known. Merging can
     // exceed the entry-count limit even when this single entry is valid.
     let (tx, rx) = oneshot::channel();
     message_channel
@@ -1087,7 +1087,7 @@ mod tests {
             .unwrap();
         assert_eq!(builder.attributes.as_ref().map(|m| m.len()), Some(0));
 
-        // array literal of `&str` tuples — the one-liner ergonomics
+        // array literal of `&str` tuples, for the one-liner ergonomics
         let builder = Client::builder(&endpoint)
             .attributes([("env", "prod"), ("region", "us-west")])
             .unwrap();
@@ -1248,7 +1248,7 @@ mod tests {
         ));
 
         // A valid single attribute passes validation, then reaches the remote
-        // layer (no server) and surfaces a remote error — proving set_attribute
+        // layer (no server) and surfaces a remote error, proving set_attribute
         // is wired through the actor/RPC path.
         let err = client
             .set_attribute("firmware", "2.1.0")

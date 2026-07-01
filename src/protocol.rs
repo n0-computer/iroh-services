@@ -10,31 +10,29 @@ use crate::{caps::Caps, net_diagnostics::DiagnosticsReport};
 
 /// The main ALPN for connecting from the client to the cloud node.
 ///
-/// # Versioning policy
+/// # Versioning
 ///
-/// The wire protocol evolves **append-only** and does not bump the version in
-/// this ALPN for additive changes. postcard encodes enum variants by index, so
-/// as long as new [`IrohServicesProtocol`] request variants and new
-/// [`RemoteError`] variants are only ever *appended* (never inserted, reordered,
-/// or removed), every previously-defined message stays wire-compatible. That
-/// gives the following compatibility guarantees:
+/// The wire protocol is append-only and does not bump this ALPN for additive
+/// changes. postcard encodes enum variants by index, so as long as new
+/// [`IrohServicesProtocol`] and [`RemoteError`] variants are only appended
+/// (never inserted, reordered, or removed), older messages stay wire-compatible:
 ///
-/// - **Old client → new server: fully compatible.** The server decodes every
-///   request an older client can send and only ever replies with error variants
-///   that client already knows.
-/// - **New client → old server:** the pre-existing requests (auth, metrics, …)
-///   still work; a *new* request the old server doesn't know fails as a
-///   per-request error rather than corrupting the connection or other traffic.
+/// - An older client always works against a newer server: the server decodes
+///   every request the client can send, and only replies with error variants the
+///   client already knows.
+/// - A newer client against an older server keeps working for the pre-existing
+///   requests (auth, metrics, and so on); a request the old server does not know
+///   fails as a per-request error rather than breaking the connection.
 ///
-/// Because the cloud node is deployed at or ahead of the clients that talk to it,
-/// the second case is transient and confined to the new calls. A *breaking*
-/// change — reordering or removing variants, or changing a message's shape —
-/// would instead require a new ALPN.
+/// The cloud node is deployed at or ahead of the clients that talk to it, so the
+/// second case is transient and limited to the new calls. A breaking change
+/// (reordering or removing variants, or changing a message's shape) requires a
+/// new ALPN.
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
 
 pub type IrohServicesClient = irpc::Client<IrohServicesProtocol>;
 
-/// New request variants MUST be appended, never inserted or reordered — see the
+/// New request variants MUST be appended, never inserted or reordered. See the
 /// versioning policy on [`ALPN`].
 #[rpc_requests(message = ServicesMessage)]
 #[derive(Debug, Serialize, Deserialize)]
