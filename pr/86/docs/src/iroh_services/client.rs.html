@@ -116,12 +116,12 @@
 <a href=#116 id=116 data-nosnippet>116</a>    /// easier to identify.
 <a href=#117 id=117 data-nosnippet>117</a>    ///
 <a href=#118 id=118 data-nosnippet>118</a>    /// Often a database user id, machine name, or other stable identifier from
-<a href=#119 id=119 data-nosnippet>119</a>    /// your application. A name must be 2–128 bytes of UTF-8; uniqueness is not
+<a href=#119 id=119 data-nosnippet>119</a>    /// your application. A name must be 2 to 128 bytes of UTF-8; uniqueness is not
 <a href=#120 id=120 data-nosnippet>120</a>    /// enforced, so different endpoints may share a name.
 <a href=#121 id=121 data-nosnippet>121</a>    ///
 <a href=#122 id=122 data-nosnippet>122</a>    /// Validation errors are returned here. The name is sent to the server after
 <a href=#123 id=123 data-nosnippet>123</a>    /// the client authenticates; a failure to send it at that point is logged at
-<a href=#124 id=124 data-nosnippet>124</a>    /// warn level rather than returned — use [`Client::set_name`] to set it later
+<a href=#124 id=124 data-nosnippet>124</a>    /// warn level rather than returned; use [`Client::set_name`] to set it later
 <a href=#125 id=125 data-nosnippet>125</a>    /// with explicit error handling.
 <a href=#126 id=126 data-nosnippet>126</a>    </span><span class="kw">pub fn </span>name(<span class="kw-2">mut </span><span class="self">self</span>, name: <span class="kw">impl </span>Into&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
 <a href=#127 id=127 data-nosnippet>127</a>        <span class="kw">let </span>name = name.into();
@@ -133,10 +133,10 @@
 <a href=#133 id=133 data-nosnippet>133</a>    <span class="doccomment">/// Attach the endpoint to a single named group when the client first
 <a href=#134 id=134 data-nosnippet>134</a>    /// authenticates.
 <a href=#135 id=135 data-nosnippet>135</a>    ///
-<a href=#136 id=136 data-nosnippet>136</a>    /// A group name must be 2–128 bytes of UTF-8. Validation errors are returned
+<a href=#136 id=136 data-nosnippet>136</a>    /// A group name must be 2 to 128 bytes of UTF-8. Validation errors are returned
 <a href=#137 id=137 data-nosnippet>137</a>    /// here. The group is sent to the server after the client authenticates; a
 <a href=#138 id=138 data-nosnippet>138</a>    /// failure to send it at that point is logged at warn level rather than
-<a href=#139 id=139 data-nosnippet>139</a>    /// returned — use [`Client::set_group`] to set it later with explicit error
+<a href=#139 id=139 data-nosnippet>139</a>    /// returned; use [`Client::set_group`] to set it later with explicit error
 <a href=#140 id=140 data-nosnippet>140</a>    /// handling.
 <a href=#141 id=141 data-nosnippet>141</a>    </span><span class="kw">pub fn </span>group(<span class="kw-2">mut </span><span class="self">self</span>, group: <span class="kw">impl </span>Into&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
 <a href=#142 id=142 data-nosnippet>142</a>        <span class="kw">let </span>group = group.into();
@@ -156,11 +156,11 @@
 <a href=#156 id=156 data-nosnippet>156</a>    /// # Ok(()) }
 <a href=#157 id=157 data-nosnippet>157</a>    /// ```
 <a href=#158 id=158 data-nosnippet>158</a>    ///
-<a href=#159 id=159 data-nosnippet>159</a>    /// Each key must be 2–128 bytes of UTF-8; values may be empty and are capped
+<a href=#159 id=159 data-nosnippet>159</a>    /// Each key must be 2 to 128 bytes of UTF-8; values may be empty and are capped
 <a href=#160 id=160 data-nosnippet>160</a>    /// at 128 bytes; at most 128 entries are allowed. Validation errors are
 <a href=#161 id=161 data-nosnippet>161</a>    /// returned here. The attributes are sent to the server after the client
 <a href=#162 id=162 data-nosnippet>162</a>    /// authenticates; a failure to send them at that point is logged at warn
-<a href=#163 id=163 data-nosnippet>163</a>    /// level rather than returned — use [`Client::set_attributes`] to set them
+<a href=#163 id=163 data-nosnippet>163</a>    /// level rather than returned; use [`Client::set_attributes`] to set them
 <a href=#164 id=164 data-nosnippet>164</a>    /// later with explicit error handling.
 <a href=#165 id=165 data-nosnippet>165</a>    </span><span class="kw">pub fn </span>attributes&lt;I, K, V&gt;(<span class="kw-2">mut </span><span class="self">self</span>, attrs: I) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt;
 <a href=#166 id=166 data-nosnippet>166</a>    <span class="kw">where
@@ -327,9 +327,9 @@
 <a href=#327 id=327 data-nosnippet>327</a><span class="doccomment">/// Error returned when an endpoint name fails validation.
 <a href=#328 id=328 data-nosnippet>328</a></span><span class="attr">#[derive(Debug, thiserror::Error)]
 <a href=#329 id=329 data-nosnippet>329</a></span><span class="kw">pub enum </span>ValidateNameError {
-<a href=#330 id=330 data-nosnippet>330</a>    <span class="attr">#[error(<span class="string">"Name is too long (must be no more than {CLIENT_NAME_MAX_LENGTH} characters)."</span>)]
+<a href=#330 id=330 data-nosnippet>330</a>    <span class="attr">#[error(<span class="string">"Name is too long (must be no more than {CLIENT_NAME_MAX_LENGTH} bytes)."</span>)]
 <a href=#331 id=331 data-nosnippet>331</a>    </span>TooLong,
-<a href=#332 id=332 data-nosnippet>332</a>    <span class="attr">#[error(<span class="string">"Name is too short (must be at least {CLIENT_NAME_MIN_LENGTH} characters)."</span>)]
+<a href=#332 id=332 data-nosnippet>332</a>    <span class="attr">#[error(<span class="string">"Name is too short (must be at least {CLIENT_NAME_MIN_LENGTH} bytes)."</span>)]
 <a href=#333 id=333 data-nosnippet>333</a>    </span>TooShort,
 <a href=#334 id=334 data-nosnippet>334</a>}
 <a href=#335 id=335 data-nosnippet>335</a>
@@ -429,7 +429,7 @@
 <a href=#429 id=429 data-nosnippet>429</a>
 <a href=#430 id=430 data-nosnippet>430</a>    <span class="doccomment">/// Attach the active endpoint to a single named group cloud-side.
 <a href=#431 id=431 data-nosnippet>431</a>    ///
-<a href=#432 id=432 data-nosnippet>432</a>    /// A group name must be 2–128 bytes of UTF-8.
+<a href=#432 id=432 data-nosnippet>432</a>    /// A group name must be 2 to 128 bytes of UTF-8.
 <a href=#433 id=433 data-nosnippet>433</a>    </span><span class="kw">pub async fn </span>set_group(<span class="kw-2">&amp;</span><span class="self">self</span>, group: <span class="kw">impl </span>Into&lt;String&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
 <a href=#434 id=434 data-nosnippet>434</a>        set_group_inner(<span class="self">self</span>.message_channel.clone(), group.into()).<span class="kw">await
 <a href=#435 id=435 data-nosnippet>435</a>    </span>}
@@ -448,7 +448,7 @@
 <a href=#448 id=448 data-nosnippet>448</a>    /// # Ok(()) }
 <a href=#449 id=449 data-nosnippet>449</a>    /// ```
 <a href=#450 id=450 data-nosnippet>450</a>    ///
-<a href=#451 id=451 data-nosnippet>451</a>    /// Each key must be 2–128 bytes of UTF-8; values may be empty and are limited
+<a href=#451 id=451 data-nosnippet>451</a>    /// Each key must be 2 to 128 bytes of UTF-8; values may be empty and are limited
 <a href=#452 id=452 data-nosnippet>452</a>    /// to 128 bytes; at most 128 entries are allowed. Each call fully replaces
 <a href=#453 id=453 data-nosnippet>453</a>    /// the prior set; passing an empty iterator clears all attributes.
 <a href=#454 id=454 data-nosnippet>454</a>    </span><span class="kw">pub async fn </span>set_attributes&lt;I, K, V&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, attrs: I) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt;
@@ -468,7 +468,7 @@
 <a href=#468 id=468 data-nosnippet>468</a>    /// attributes rather than replacing the whole set.
 <a href=#469 id=469 data-nosnippet>469</a>    ///
 <a href=#470 id=470 data-nosnippet>470</a>    /// A convenience over [`set_attributes`](Self::set_attributes) when you only
-<a href=#471 id=471 data-nosnippet>471</a>    /// need to change one value. The key must be 2–128 bytes of UTF-8 and the
+<a href=#471 id=471 data-nosnippet>471</a>    /// need to change one value. The key must be 2 to 128 bytes of UTF-8 and the
 <a href=#472 id=472 data-nosnippet>472</a>    /// value is limited to 128 bytes; the merged set must stay within 128 entries.
 <a href=#473 id=473 data-nosnippet>473</a>    </span><span class="kw">pub async fn </span>set_attribute(
 <a href=#474 id=474 data-nosnippet>474</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
@@ -923,7 +923,7 @@
 <a href=#923 id=923 data-nosnippet>923</a>    value: String,
 <a href=#924 id=924 data-nosnippet>924</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), Error&gt; {
 <a href=#925 id=925 data-nosnippet>925</a>    <span class="comment">// Validation happens in the actor against the merged set (current attributes
-<a href=#926 id=926 data-nosnippet>926</a>    // plus this entry), since only there is the current set known — merging can
+<a href=#926 id=926 data-nosnippet>926</a>    // plus this entry), since only there is the current set known. Merging can
 <a href=#927 id=927 data-nosnippet>927</a>    // exceed the entry-count limit even when this single entry is valid.
 <a href=#928 id=928 data-nosnippet>928</a>    </span><span class="kw">let </span>(tx, rx) = oneshot::channel();
 <a href=#929 id=929 data-nosnippet>929</a>    message_channel
@@ -1087,7 +1087,7 @@
 <a href=#1087 id=1087 data-nosnippet>1087</a>            .unwrap();
 <a href=#1088 id=1088 data-nosnippet>1088</a>        <span class="macro">assert_eq!</span>(builder.attributes.as_ref().map(|m| m.len()), <span class="prelude-val">Some</span>(<span class="number">0</span>));
 <a href=#1089 id=1089 data-nosnippet>1089</a>
-<a href=#1090 id=1090 data-nosnippet>1090</a>        <span class="comment">// array literal of `&amp;str` tuples — the one-liner ergonomics
+<a href=#1090 id=1090 data-nosnippet>1090</a>        <span class="comment">// array literal of `&amp;str` tuples, for the one-liner ergonomics
 <a href=#1091 id=1091 data-nosnippet>1091</a>        </span><span class="kw">let </span>builder = Client::builder(<span class="kw-2">&amp;</span>endpoint)
 <a href=#1092 id=1092 data-nosnippet>1092</a>            .attributes([(<span class="string">"env"</span>, <span class="string">"prod"</span>), (<span class="string">"region"</span>, <span class="string">"us-west"</span>)])
 <a href=#1093 id=1093 data-nosnippet>1093</a>            .unwrap();
@@ -1248,7 +1248,7 @@
 <a href=#1248 id=1248 data-nosnippet>1248</a>        ));
 <a href=#1249 id=1249 data-nosnippet>1249</a>
 <a href=#1250 id=1250 data-nosnippet>1250</a>        <span class="comment">// A valid single attribute passes validation, then reaches the remote
-<a href=#1251 id=1251 data-nosnippet>1251</a>        // layer (no server) and surfaces a remote error — proving set_attribute
+<a href=#1251 id=1251 data-nosnippet>1251</a>        // layer (no server) and surfaces a remote error, proving set_attribute
 <a href=#1252 id=1252 data-nosnippet>1252</a>        // is wired through the actor/RPC path.
 <a href=#1253 id=1253 data-nosnippet>1253</a>        </span><span class="kw">let </span>err = client
 <a href=#1254 id=1254 data-nosnippet>1254</a>            .set_attribute(<span class="string">"firmware"</span>, <span class="string">"2.1.0"</span>)

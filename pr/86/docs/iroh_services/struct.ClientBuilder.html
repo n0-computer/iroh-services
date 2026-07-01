@@ -11,18 +11,18 @@ created with <a href="struct.Client.html#method.builder" title="associated funct
 </div></details><details class="toggle method-toggle" open><summary><section id="method.name" class="method"><a class="src rightside" href="../src/iroh_services/client.rs.html#126-131">Source</a><h4 class="code-header">pub fn <a href="#method.name" class="fn">name</a>(self, name: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;) -&gt; <a class="type" href="https://docs.rs/anyhow/1.0.103/anyhow/type.Result.html" title="type anyhow::Result">Result</a>&lt;Self&gt;</h4></section></summary><div class="docblock"><p>Set an optional human-readable name for the endpoint, making its metrics
 easier to identify.</p>
 <p>Often a database user id, machine name, or other stable identifier from
-your application. A name must be 2–128 bytes of UTF-8; uniqueness is not
+your application. A name must be 2 to 128 bytes of UTF-8; uniqueness is not
 enforced, so different endpoints may share a name.</p>
 <p>Validation errors are returned here. The name is sent to the server after
 the client authenticates; a failure to send it at that point is logged at
-warn level rather than returned — use <a href="struct.Client.html#method.set_name" title="method iroh_services::Client::set_name"><code>Client::set_name</code></a> to set it later
+warn level rather than returned; use <a href="struct.Client.html#method.set_name" title="method iroh_services::Client::set_name"><code>Client::set_name</code></a> to set it later
 with explicit error handling.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.group" class="method"><a class="src rightside" href="../src/iroh_services/client.rs.html#141-146">Source</a><h4 class="code-header">pub fn <a href="#method.group" class="fn">group</a>(self, group: impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.Into.html" title="trait core::convert::Into">Into</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;) -&gt; <a class="type" href="https://docs.rs/anyhow/1.0.103/anyhow/type.Result.html" title="type anyhow::Result">Result</a>&lt;Self&gt;</h4></section></summary><div class="docblock"><p>Attach the endpoint to a single named group when the client first
 authenticates.</p>
-<p>A group name must be 2–128 bytes of UTF-8. Validation errors are returned
+<p>A group name must be 2 to 128 bytes of UTF-8. Validation errors are returned
 here. The group is sent to the server after the client authenticates; a
 failure to send it at that point is logged at warn level rather than
-returned — use <a href="struct.Client.html#method.set_group" title="method iroh_services::Client::set_group"><code>Client::set_group</code></a> to set it later with explicit error
+returned; use <a href="struct.Client.html#method.set_group" title="method iroh_services::Client::set_group"><code>Client::set_group</code></a> to set it later with explicit error
 handling.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.attributes" class="method"><a class="src rightside" href="../src/iroh_services/client.rs.html#165-178">Source</a><h4 class="code-header">pub fn <a href="#method.attributes" class="fn">attributes</a>&lt;I, K, V&gt;(self, attrs: I) -&gt; <a class="type" href="https://docs.rs/anyhow/1.0.103/anyhow/type.Result.html" title="type anyhow::Result">Result</a>&lt;Self&gt;<div class="where">where
     I: <a class="trait" href="https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.IntoIterator.html" title="trait core::iter::traits::collect::IntoIterator">IntoIterator</a>&lt;Item = <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.tuple.html">(K, V)</a>&gt;,
@@ -31,11 +31,11 @@ handling.</p>
 first authenticates. Accepts any iterable of <code>(key, value)</code> pairs:</p>
 
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let _ </span>= Client::builder(endpoint).attributes([(<span class="string">"env"</span>, <span class="string">"prod"</span>), (<span class="string">"region"</span>, <span class="string">"us-west"</span>)])<span class="question-mark">?</span>;</code></pre></div>
-<p>Each key must be 2–128 bytes of UTF-8; values may be empty and are capped
+<p>Each key must be 2 to 128 bytes of UTF-8; values may be empty and are capped
 at 128 bytes; at most 128 entries are allowed. Validation errors are
 returned here. The attributes are sent to the server after the client
 authenticates; a failure to send them at that point is logged at warn
-level rather than returned — use <a href="struct.Client.html#method.set_attributes" title="method iroh_services::Client::set_attributes"><code>Client::set_attributes</code></a> to set them
+level rather than returned; use <a href="struct.Client.html#method.set_attributes" title="method iroh_services::Client::set_attributes"><code>Client::set_attributes</code></a> to set them
 later with explicit error handling.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.api_secret_from_env" class="method"><a class="src rightside" href="../src/iroh_services/client.rs.html#181-184">Source</a><h4 class="code-header">pub fn <a href="#method.api_secret_from_env" class="fn">api_secret_from_env</a>(self) -&gt; <a class="type" href="https://docs.rs/anyhow/1.0.103/anyhow/type.Result.html" title="type anyhow::Result">Result</a>&lt;Self&gt;</h4></section></summary><div class="docblock"><p>Check IROH_SERVICES_API_SECRET environment variable for a valid API secret</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.api_secret_from_str" class="method"><a class="src rightside" href="../src/iroh_services/client.rs.html#187-190">Source</a><h4 class="code-header">pub fn <a href="#method.api_secret_from_str" class="fn">api_secret_from_str</a>(self, secret_key: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>) -&gt; <a class="type" href="https://docs.rs/anyhow/1.0.103/anyhow/type.Result.html" title="type anyhow::Result">Result</a>&lt;Self&gt;</h4></section></summary><div class="docblock"><p>set client API secret from an encoded string</p>
