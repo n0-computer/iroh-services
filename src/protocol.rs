@@ -9,10 +9,33 @@ use uuid::Uuid;
 use crate::{caps::Caps, net_diagnostics::DiagnosticsReport};
 
 /// The main ALPN for connecting from the client to the cloud node.
+///
+/// # Versioning policy
+///
+/// The wire protocol evolves **append-only** and does not bump the version in
+/// this ALPN for additive changes. postcard encodes enum variants by index, so
+/// as long as new [`IrohServicesProtocol`] request variants and new
+/// [`RemoteError`] variants are only ever *appended* (never inserted, reordered,
+/// or removed), every previously-defined message stays wire-compatible. That
+/// gives the following compatibility guarantees:
+///
+/// - **Old client → new server: fully compatible.** The server decodes every
+///   request an older client can send and only ever replies with error variants
+///   that client already knows.
+/// - **New client → old server:** the pre-existing requests (auth, metrics, …)
+///   still work; a *new* request the old server doesn't know fails as a
+///   per-request error rather than corrupting the connection or other traffic.
+///
+/// Because the cloud node is deployed at or ahead of the clients that talk to it,
+/// the second case is transient and confined to the new calls. A *breaking*
+/// change — reordering or removing variants, or changing a message's shape —
+/// would instead require a new ALPN.
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
 
 pub type IrohServicesClient = irpc::Client<IrohServicesProtocol>;
 
+/// New request variants MUST be appended, never inserted or reordered — see the
+/// versioning policy on [`ALPN`].
 #[rpc_requests(message = ServicesMessage)]
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
