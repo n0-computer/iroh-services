@@ -55,6 +55,8 @@ cfg_aliases = "0.2.1"
 [dev-dependencies]
 rand = { version = "0.10", features = ["chacha"] }
 n0-error = { version = "1.0.0", features = ["anyhow"] }
+iroh-ping = "1.0.0"
+clap = { version = "4.6.4", features = ["derive"] }
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dev-dependencies]
 temp_env_vars = "0.2.1"
