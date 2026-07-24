@@ -49,7 +49,7 @@ use std::{
 use anyhow::{Context, Result};
 use clap::Parser;
 use data_encoding::HEXLOWER;
-use iroh::{Endpoint, EndpointId, RelayMap, RelayUrl, SecretKey, Watcher, protocol::Router};
+use iroh::{Endpoint, EndpointId, RelayMap, RelayUrl, SecretKey, protocol::Router};
 
 /// Bind an iroh services endpoint and ping the given targets over iroh-ping.
 #[derive(Debug, clap::Parser)]
@@ -147,7 +147,7 @@ fn relay_map_from_env() -> Result<RelayMap> {
                 let url: RelayUrl = url_string
                     .trim()
                     .parse()
-                    .with_context(|| "Failed to parse string as relay URL: {url_string}")?;
+                    .with_context(|| format!("Failed to parse string as relay URL: {url_string}"))?;
                 urls.push(url);
             }
             println!(
