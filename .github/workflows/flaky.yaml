@@ -47,6 +47,7 @@ jobs:
     with:
       flaky: true
       git-ref: ${{ inputs.branch }}
+    secrets: inherit
   notify:
     needs: tests
     if: ${{ always() }}

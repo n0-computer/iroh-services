@@ -30,7 +30,7 @@
 
 mod client;
 mod client_host;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(wasm_browser))]
 mod openssh;
 
 pub mod api_secret;

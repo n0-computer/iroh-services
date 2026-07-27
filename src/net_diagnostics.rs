@@ -33,10 +33,11 @@ pub struct PortMapProbe {
 }
 
 pub mod checks {
-    use std::{net::SocketAddr, time::Duration};
+    use std::net::SocketAddr;
 
     use anyhow::Result;
     use iroh::{Endpoint, Watcher};
+    use n0_future::time::Duration;
 
     use super::*;
 
@@ -53,7 +54,7 @@ pub mod checks {
         let endpoint_id = endpoint.id();
 
         // 1. Wait for relay connection
-        if tokio::time::timeout(timeout, endpoint.online())
+        if n0_future::time::timeout(timeout, endpoint.online())
             .await
             .is_err()
         {
@@ -62,7 +63,7 @@ pub mod checks {
 
         // 2. Net report (includes relay latencies and UDP connectivity)
         let mut watcher = endpoint.net_report();
-        let net_report = match tokio::time::timeout(timeout, watcher.initialized()).await {
+        let net_report = match n0_future::time::timeout(timeout, watcher.initialized()).await {
             Ok(report) => Some(report),
             Err(_) => {
                 tracing::warn!("net report timed out after {timeout:?}, using partial data");
@@ -75,9 +76,9 @@ pub mod checks {
         let direct_addrs: Vec<SocketAddr> = addr.ip_addrs().copied().collect();
 
         // 4. Port mapping probe (the one thing NetReport doesn't include)
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(wasm_browser))]
         let portmap_probe =
-            match tokio::time::timeout(Duration::from_secs(5), probe_port_mapping()).await {
+            match n0_future::time::timeout(Duration::from_secs(5), probe_port_mapping()).await {
                 Ok(Ok(p)) => Some(p),
                 Ok(Err(e)) => {
                     tracing::warn!("portmap probe failed: {e}");
@@ -88,8 +89,15 @@ pub mod checks {
                     None
                 }
             };
-        #[cfg(target_arch = "wasm32")]
-        let portmap_probe = None;
+
+        // TODO: setting `portmap_probe` to `None` makes svc fail to parse the report.
+        // Should be fixed there, but this works too for now.
+        #[cfg(wasm_browser)]
+        let portmap_probe = Some(PortMapProbe {
+            upnp: false,
+            pcp: false,
+            nat_pmp: false,
+        });
 
         Ok(DiagnosticsReport {
             endpoint_id,
@@ -101,7 +109,7 @@ pub mod checks {
         })
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(wasm_browser))]
     async fn probe_port_mapping() -> Result<PortMapProbe> {
         let config = portmapper::Config {
             enable_upnp: true,

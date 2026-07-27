@@ -1,0 +1,5 @@
+[build.env]
+passthrough = [
+    "RUST_LOG",
+    "IROH_SERVICES_API_SECRET",
+]
