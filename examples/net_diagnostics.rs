@@ -64,9 +64,10 @@ async fn main() -> Result<()> {
         .accept(CLIENT_HOST_ALPN, host)
         .spawn();
 
-    // 6. Run diagnostics locally (pass true to also upload results to iroh-services).
+    // 6. Run diagnostics locally and upload the results to iroh-services
+    //    (pass false to keep the report local).
     println!("Running network diagnostics...\n");
-    let report = client.net_diagnostics(false).await?;
+    let report = client.net_diagnostics(true).await?;
     println!("{:?}", report);
 
     println!("waiting for remote diagnostics requests. ctrl+c to exit.");
