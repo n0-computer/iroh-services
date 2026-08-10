@@ -96,6 +96,9 @@ impl ApiSecret {
     /// Read an Api Secret from a given environment variable
     pub fn from_env_var(env_var: &str) -> anyhow::Result<Self> {
         match std::env::var(env_var) {
+            Ok(ticket_string) if ticket_string.is_empty() => {
+                Err(anyhow!("{env_var} environment variable is set but empty"))
+            }
             Ok(ticket_string) => Self::from_str(&ticket_string)
                 .context(format!("invalid api secret at env var {env_var}")),
             Err(VarError::NotPresent) => Err(anyhow!("{env_var} environment variable is not set")),
