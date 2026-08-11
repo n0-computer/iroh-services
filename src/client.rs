@@ -259,6 +259,7 @@ impl ClientBuilder {
         let conn = IrohLazyRemoteConnection::new(self.endpoint.clone(), remote, ALPN.to_vec());
         let irpc_client = IrohServicesClient::boxed(conn);
 
+        let registry = Arc::new(RwLock::new(self.registry));
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         let actor_task = AbortOnDropHandle::new(n0_future::task::spawn(
             ClientActor {
@@ -269,8 +270,10 @@ impl ClientBuilder {
                 attributes: self.attributes.clone().unwrap_or_default(),
                 session_id: Uuid::new_v4(),
                 authorized: false,
+                encoder: Encoder::new(registry.clone()),
+                registry,
             }
-            .run(self.registry, self.metrics_interval, rx),
+            .run(self.metrics_interval, rx),
         ));
 
         Ok(Client {
@@ -637,17 +640,17 @@ struct ClientActor {
     attributes: BTreeMap<String, String>,
     session_id: Uuid,
     authorized: bool,
+    encoder: Encoder,
+    // Kept so auth() can rebuild the encoder; a fresh encoder re-sends the schema.
+    registry: Arc<RwLock<Registry>>,
 }
 
 impl ClientActor {
     async fn run(
         mut self,
-        registry: Registry,
         interval: Option<Duration>,
         mut inbox: tokio::sync::mpsc::Receiver<ClientActorMessage>,
     ) {
-        let registry = Arc::new(RwLock::new(registry));
-        let mut encoder = Encoder::new(registry);
         let mut metrics_timer = interval.map(|interval| n0_future::time::interval(interval));
         trace!("starting client actor");
 
@@ -686,7 +689,7 @@ impl ClientActor {
                         },
                         ClientActorMessage::SendMetrics{ done } => {
                             trace!("sending metrics manually triggered");
-                            let res = self.send_metrics(&mut encoder).await;
+                            let res = self.send_metrics().await;
                             if let Err(err) = done.send(res) {
                                 debug!("failed to push metrics: {:#?}", err);
                                 self.authorized = false;
@@ -751,7 +754,7 @@ impl ClientActor {
                         }
                         ClientActorMessage::Shutdown { done } => {
                             if metrics_timer.is_some()
-                                && let Err(err) = self.send_metrics(&mut encoder).await
+                                && let Err(err) = self.send_metrics().await
                             {
                                 debug!("failed to push final metrics on shutdown: {:#?}", err);
                             }
@@ -768,7 +771,7 @@ impl ClientActor {
                     }
                 } => {
                     trace!("metrics send tick");
-                    if let Err(err) = self.send_metrics(&mut encoder).await {
+                    if let Err(err) = self.send_metrics().await {
                         debug!("failed to push metrics: {:#?}", err);
                         self.authorized = false;
                     }
@@ -792,7 +795,25 @@ impl ClientActor {
             .inspect_err(|e| debug!("authorization failed: {:?}", e))
             .map_err(|e| RemoteError::AuthError(e.to_string()))?;
         self.authorized = true;
+        // A completed handshake means a fresh connection, and the server keeps
+        // one metrics decoder per connection. A new encoder starts at schema
+        // version zero, so the next export carries the full schema for that
+        // decoder. Re-importing a schema is idempotent server-side, so
+        // re-sending after a spurious re-auth is harmless.
+        self.encoder = Encoder::new(self.registry.clone());
         Ok(())
+    }
+
+    /// Marks the session unauthorized when an rpc fails.
+    ///
+    /// The lazy connection re-dials on the next request, and the server
+    /// accepts only Auth first on a new connection, so the next call must run
+    /// the handshake again (which also re-sends the metrics schema).
+    fn track_rpc<T>(&mut self, res: Result<T, irpc::Error>) -> Result<T, irpc::Error> {
+        if res.is_err() {
+            self.authorized = false;
+        }
+        res
     }
 
     async fn send_ping(&mut self) -> Result<Pong, RemoteError> {
@@ -800,9 +821,8 @@ impl ClientActor {
         self.auth().await?;
 
         let req = rand::random();
-        self.client
-            .rpc(Ping { req_id: req })
-            .await
+        let res = self.client.rpc(Ping { req_id: req }).await;
+        self.track_rpc(res)
             .inspect_err(|e| warn!("rpc ping error: {e}"))
             .map_err(|_| RemoteError::InternalServerError)
     }
@@ -811,9 +831,8 @@ impl ClientActor {
         trace!("client sending name endpoint request");
         self.auth().await?;
 
-        self.client
-            .rpc(NameEndpoint { name: name.clone() })
-            .await
+        let res = self.client.rpc(NameEndpoint { name: name.clone() }).await;
+        self.track_rpc(res)
             .inspect_err(|e| debug!("name endpoint error: {e}"))
             .map_err(|_| RemoteError::InternalServerError)??;
         self.name = Some(name);
@@ -853,20 +872,19 @@ impl ClientActor {
         Ok(())
     }
 
-    async fn send_metrics(&mut self, encoder: &mut Encoder) -> Result<(), RemoteError> {
+    async fn send_metrics(&mut self) -> Result<(), RemoteError> {
         trace!("client actor send metrics");
         self.auth().await?;
 
-        let update = encoder.export();
+        let update = self.encoder.export();
         // let delta = update_delta(&self.latest_ackd_update, &update);
         let req = PutMetrics {
             session_id: self.session_id,
             update,
         };
 
-        self.client
-            .rpc(req)
-            .await
+        let res = self.client.rpc(req).await;
+        self.track_rpc(res)
             .map_err(|_| RemoteError::InternalServerError)??;
 
         Ok(())
@@ -876,9 +894,8 @@ impl ClientActor {
         trace!("client actor grant capability");
         self.auth().await?;
 
-        self.client
-            .rpc(crate::protocol::GrantCap { cap })
-            .await
+        let res = self.client.rpc(crate::protocol::GrantCap { cap }).await;
+        self.track_rpc(res)
             .map_err(|_| RemoteError::InternalServerError)??;
 
         Ok(())
@@ -893,9 +910,8 @@ impl ClientActor {
 
         let req = PutNetworkDiagnostics { report };
 
-        self.client
-            .rpc(req)
-            .await
+        let res = self.client.rpc(req).await;
+        self.track_rpc(res)
             .map_err(|_| RemoteError::InternalServerError)??;
 
         Ok(())
@@ -976,22 +992,204 @@ async fn set_attribute_inner(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{
+        collections::HashMap,
+        sync::{
+            Arc, RwLock,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
 
-    use iroh::{Endpoint, EndpointAddr, SecretKey, endpoint::presets};
+    use iroh::{
+        Endpoint, EndpointAddr, SecretKey,
+        endpoint::{Connection, presets},
+        protocol::{AcceptError, ProtocolHandler, Router},
+    };
+    use iroh_metrics::{
+        Registry,
+        encoding::{Decoder, Encoder},
+    };
+    use irpc::WithChannels;
+    use irpc_iroh::read_request;
+    use n0_error::AnyError;
+    use n0_future::time::Duration;
     use rand::{RngExt, SeedableRng};
     use temp_env_vars::temp_env_vars;
 
     use crate::{
         Client,
         api_secret::ApiSecret,
-        caps::{Cap, Caps},
+        caps::{Cap, Caps, create_api_token_from_secret_key},
         client::{
             API_SECRET_ENV_VAR_NAME, BuildError, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH,
             CLIENT_ATTRIBUTES_MAX_COUNT, CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError,
             ValidateNameError,
         },
+        protocol::{ALPN, IrohServicesProtocol, ServicesMessage},
     };
+
+    /// What the test server recorded about one PutMetrics request.
+    #[derive(Debug)]
+    struct SeenUpdate {
+        has_schema: bool,
+        decoded_items: usize,
+    }
+
+    /// In-process stand-in for the services backend.
+    ///
+    /// Mirrors the real server's session rules: the first request on every
+    /// connection must be Auth, and the metrics decoder lives per connection.
+    #[derive(Debug)]
+    struct RecordingServer {
+        seen: tokio::sync::mpsc::UnboundedSender<SeenUpdate>,
+        drop_next: Arc<AtomicBool>,
+    }
+
+    impl ProtocolHandler for RecordingServer {
+        async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+            self.handle_connection(connection).await.map_err(|e| {
+                let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
+                AcceptError::from(AnyError::from(boxed))
+            })
+        }
+    }
+
+    impl RecordingServer {
+        async fn handle_connection(&self, connection: Connection) -> anyhow::Result<()> {
+            let mut decoder = Decoder::default();
+            let mut authed = false;
+            loop {
+                let Some(request) = read_request::<IrohServicesProtocol>(&connection).await? else {
+                    return Ok(());
+                };
+                if self.drop_next.swap(false, Ordering::SeqCst) {
+                    // Simulates a server restart: the connection dies without an
+                    // answer and takes the per-connection decoder with it.
+                    connection.close(500u32.into(), b"test restart");
+                    return Ok(());
+                }
+                match request {
+                    ServicesMessage::Auth(WithChannels { tx, .. }) => {
+                        authed = true;
+                        tx.send(()).await?;
+                    }
+                    ServicesMessage::PutMetrics(WithChannels { inner, tx, .. }) if authed => {
+                        let has_schema = inner.update.schema.is_some();
+                        decoder.import(inner.update);
+                        let decoded_items = decoder.iter().count();
+                        let _ = self.seen.send(SeenUpdate {
+                            has_schema,
+                            decoded_items,
+                        });
+                        tx.send(Ok(())).await?;
+                    }
+                    _ => {
+                        connection.close(400u32.into(), b"Expected initial auth message");
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
+    /// A reconnect must make the next metrics update carry the schema.
+    ///
+    /// The server holds one decoder per connection, so the first update after
+    /// a re-auth is undecodable unless the schema comes along again.
+    #[tokio::test]
+    async fn test_metrics_schema_resent_after_reconnect() {
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(2);
+        let server_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+        let client_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+
+        let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
+        let drop_next = Arc::new(AtomicBool::new(false));
+        let server = RecordingServer {
+            seen: seen_tx,
+            drop_next: drop_next.clone(),
+        };
+        let router = Router::builder(server_ep.clone())
+            .accept(ALPN, server)
+            .spawn();
+
+        // The test server accepts any capability, so a self-issued token works.
+        let shared_secret = SecretKey::from_bytes(&rng.random());
+        let cap = create_api_token_from_secret_key(
+            shared_secret,
+            client_ep.id(),
+            Duration::from_secs(3600),
+            Caps::for_shared_secret(),
+        )
+        .unwrap();
+
+        let client = Client::builder(&client_ep)
+            .disable_metrics_interval()
+            .remote(server_ep.addr())
+            .rcan(cap)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+
+        // The first export on a fresh session carries the schema.
+        client.push_metrics().await.unwrap();
+        let first = seen_rx.recv().await.unwrap();
+        assert!(first.has_schema);
+        assert!(first.decoded_items > 0);
+
+        // Steady state suppresses the schema; the connection's decoder
+        // already has it and keeps decoding.
+        client.push_metrics().await.unwrap();
+        let second = seen_rx.recv().await.unwrap();
+        assert!(!second.has_schema);
+        assert!(second.decoded_items > 0);
+
+        // The server drops the connection mid-request: one failed round trip.
+        drop_next.store(true, Ordering::SeqCst);
+        assert!(client.push_metrics().await.is_err());
+
+        // The client re-dials and re-auths; the first update on the new
+        // connection must include the schema for the server's fresh decoder.
+        client.push_metrics().await.unwrap();
+        let third = seen_rx.recv().await.unwrap();
+        assert!(third.has_schema, "schema must be re-sent after a reconnect");
+        assert!(third.decoded_items > 0);
+
+        router.shutdown().await.unwrap();
+        client_ep.close().await;
+    }
+
+    /// Documents the encoder and decoder contract the reconnect fix relies on.
+    #[tokio::test]
+    async fn test_fresh_encoder_resends_schema() {
+        let endpoint = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+        let mut registry = Registry::default();
+        registry.register_all(endpoint.metrics());
+        let registry = Arc::new(RwLock::new(registry));
+
+        let mut encoder = Encoder::new(registry.clone());
+        let first = encoder.export();
+        assert!(first.schema.is_some());
+
+        // Steady state omits the schema once it has been exported.
+        let schemaless = encoder.export();
+        assert!(schemaless.schema.is_none());
+
+        // A decoder that never saw the schema decodes such an update to
+        // nothing: this is the server side of the reconnect bug.
+        let mut fresh_decoder = Decoder::default();
+        fresh_decoder.import(schemaless);
+        assert_eq!(fresh_decoder.iter().count(), 0);
+
+        // A new encoder over the same registry starts at schema version zero
+        // and re-publishes the schema, which is what auth() does on re-auth.
+        let mut encoder = Encoder::new(registry);
+        let resent = encoder.export();
+        assert!(resent.schema.is_some());
+        let mut fresh_decoder = Decoder::default();
+        fresh_decoder.import(resent);
+        assert!(fresh_decoder.iter().count() > 0);
+    }
 
     #[tokio::test]
     #[temp_env_vars]
