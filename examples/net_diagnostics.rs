@@ -10,11 +10,8 @@
 //!
 //! Run with: cargo run --example net_diagnostics
 use anyhow::Result;
-use iroh::{Endpoint, endpoint::presets, protocol::Router};
-use iroh_services::{
-    API_SECRET_ENV_VAR_NAME, ApiSecret, CLIENT_HOST_ALPN, Client, ClientHost,
-    caps::NetDiagnosticsCap,
-};
+use iroh::{Endpoint, protocol::Router};
+use iroh_services::{CLIENT_HOST_ALPN, ClientHost, caps::NetDiagnosticsCap};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -22,11 +19,11 @@ async fn main() -> Result<()> {
 
     // 1. Create an endpoint that will both dial iroh-services and accept incoming
     //    requests from the iroh-services service via a ClientHost.
-    let endpoint = Endpoint::bind(presets::N0).await?;
+    //    Needs IROH_SERVICES_API_SECRET set as an environment variable.
+    //    The preset is cloned so we can reuse its API secret below.
+    let preset = iroh_services::preset().api_secret_from_env()?.build()?;
 
-    // 2. Parse the ApiSecret separately so we can extract the remote
-    //    EndpointID. Normally we'd pass it straight to the client builder.
-    let secret = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
+    let endpoint = Endpoint::bind(preset.clone()).await?;
 
     // optional: name the endpoint. Here we generate a name from the endpoint id
     // to keep name unique. in your app this would be used to connect with
@@ -34,20 +31,18 @@ async fn main() -> Result<()> {
     let id = endpoint.id().to_string();
     let name = format!("net-diagnostics-example-{}", &id[..8]);
 
-    // 3. Build a Client that dials iroh-services (as in all other examples).
-    let client = Client::builder(&endpoint)
-        .api_secret(secret.clone())?
-        .name(name)?
-        .build()
-        .await?;
+    // 2. Build a Client that dials iroh-services (as in all other examples).
+    //    client_builder reuses the preset's API secret, which also carries the
+    //    address of the iroh-services endpoint to dial.
+    let client = preset.client_builder(&endpoint).name(name)?.build().await?;
 
-    // 4. grant the ability to get diagnostics to the remote EndpointID associated
+    // 3. grant the ability to get diagnostics to the remote EndpointID associated
     //    with our project on iroh-services. This will create a capability token, send it to
     //    the remote for storage & confirm receipt. We do this in a task to avoid
     //    blocking the local node startup in the rare case that remote endpoint is
     //    down when this process starts.
     let client2 = client.clone();
-    let remote_id = secret.addr().id;
+    let remote_id = preset.api_secret().addr().id;
     let t = tokio::spawn(async move {
         if let Err(err) = client2
             .grant_capability(remote_id, vec![NetDiagnosticsCap::GetAny])
@@ -57,14 +52,14 @@ async fn main() -> Result<()> {
         }
     });
 
-    // 5. Set up a ClientHost so iroh-services can dial *back* into this endpoint.
+    // 4. Set up a ClientHost so iroh-services can dial *back* into this endpoint.
     //    Incoming connections must present an RCAN issued by this endpoint.
     let host = ClientHost::new(&endpoint);
     let router = Router::builder(endpoint)
         .accept(CLIENT_HOST_ALPN, host)
         .spawn();
 
-    // 6. Run diagnostics locally and upload the results to iroh-services
+    // 5. Run diagnostics locally and upload the results to iroh-services
     //    (pass false to keep the report local).
     println!("Running network diagnostics...\n");
     let report = client.net_diagnostics(true).await?;
