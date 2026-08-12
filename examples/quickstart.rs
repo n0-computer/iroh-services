@@ -28,6 +28,8 @@ async fn main() -> anyhow::Result<()> {
     // ctrl+c to exit.
     println!("endpoint running. ctrl+c to exit.");
     tokio::signal::ctrl_c().await?;
+    // push the metrics accumulated since the last interval tick
+    client.shutdown().await;
     endpoint.close().await;
 
     Ok(())

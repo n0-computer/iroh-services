@@ -506,6 +506,28 @@ impl Client {
             .map_err(Error::Remote)
     }
 
+    /// Shuts down the client, pushing one final round of metrics first.
+    ///
+    /// The final push only happens when the metrics interval is enabled, and
+    /// is best effort: push errors are logged and ignored. After this returns
+    /// the background actor has stopped, so requests on any clone of this
+    /// client will fail. Dropping the client without calling this aborts the
+    /// actor immediately, losing any metrics accumulated since the last
+    /// interval push.
+    pub async fn shutdown(&self) {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .message_channel
+            .send(ClientActorMessage::Shutdown { done: tx })
+            .await
+            .is_err()
+        {
+            // actor already stopped
+            return;
+        }
+        let _ = rx.await;
+    }
+
     /// Grant capabilities to a remote endpoint. Creates a signed RCAN token
     /// and sends it to iroh-services for storage. The remote can then use this token
     /// when dialing back to authorize its requests.
@@ -600,6 +622,9 @@ enum ClientActorMessage {
         // merged-set validation happens in the actor, where the current set is
         // known, and can fail with a local `InvalidAttributes` error.
         done: oneshot::Sender<Result<(), Error>>,
+    },
+    Shutdown {
+        done: oneshot::Sender<()>,
     },
 }
 
@@ -723,6 +748,15 @@ impl ClientActor {
                                 warn!("failed to publish network diagnostics: {:#?}", err);
                             }
                         }
+                        ClientActorMessage::Shutdown{ done } => {
+                            if metrics_timer.is_some()
+                                && let Err(err) = self.send_metrics(&mut encoder).await
+                            {
+                                debug!("failed to push final metrics on shutdown: {:#?}", err);
+                            }
+                            let _ = done.send(());
+                            break;
+                        }
                     }
                 }
                 _ = async {
@@ -740,6 +774,7 @@ impl ClientActor {
                 },
             }
         }
+        debug!("client actor shut down");
     }
 
     // sends an authorization request to the server
@@ -1003,6 +1038,31 @@ mod tests {
             .await
             .unwrap();
 
+        let err = client.push_metrics().await;
+        assert!(err.is_err());
+    }
+
+    /// Assert that shutdown returns even when the final metrics push fails,
+    /// and that the actor is stopped afterwards.
+    #[tokio::test]
+    async fn test_shutdown_stops_actor() {
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(2);
+        let shared_secret = SecretKey::from_bytes(&rng.random());
+        let fake_endpoint_id = SecretKey::from_bytes(&rng.random()).public();
+        let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+
+        let endpoint = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+
+        let client = Client::builder(&endpoint)
+            .api_secret(api_secret)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+
+        client.shutdown().await;
+
+        // the actor is gone, so requests fail
         let err = client.push_metrics().await;
         assert!(err.is_err());
     }
