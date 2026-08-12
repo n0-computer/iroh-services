@@ -95,9 +95,10 @@ impl ClientBuilder {
 
     /// Set the metrics collection interval
     ///
-    /// Defaults to enabled, every 60 seconds.
+    /// Defaults to enabled, every 60 seconds. A zero interval disables
+    /// periodic pushes, same as [`Self::disable_metrics_interval`].
     pub fn metrics_interval(mut self, interval: Duration) -> Self {
-        self.metrics_interval = Some(interval);
+        self.metrics_interval = (!interval.is_zero()).then_some(interval);
         self
     }
 
@@ -689,6 +690,29 @@ mod tests {
 
         let err = client.push_metrics().await;
         assert!(err.is_err());
+    }
+
+    /// A zero interval must disable periodic pushes instead of panicking the
+    /// client actor, which would silently stop all metrics and requests.
+    #[tokio::test]
+    async fn test_zero_metrics_interval() {
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(1);
+        let shared_secret = SecretKey::from_bytes(&rng.random());
+        let fake_endpoint_id = SecretKey::from_bytes(&rng.random()).public();
+        let api_secret = ApiSecret::new(shared_secret.clone(), fake_endpoint_id);
+
+        let endpoint = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+
+        let client = Client::builder(&endpoint)
+            .metrics_interval(n0_future::time::Duration::ZERO)
+            .api_secret(api_secret)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+
+        // The actor is alive and answers requests.
+        assert_eq!(client.name().await.unwrap(), None);
     }
 
     #[tokio::test]
