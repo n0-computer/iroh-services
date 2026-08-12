@@ -1373,6 +1373,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
+name = "humantime"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1843,6 +1849,7 @@ dependencies = [
  "ed25519-dalek",
  "futures-buffered",
  "getrandom 0.4.2",
+ "humantime",
  "iroh",
  "iroh-metrics",
  "iroh-ping",
@@ -1851,6 +1858,7 @@ dependencies = [
  "irpc-iroh",
  "n0-error",
  "n0-future",
+ "parse-size",
  "portmapper",
  "postcard",
  "rand",
@@ -2670,6 +2678,12 @@ dependencies = [
  "smallvec",
  "windows-link",
 ]
+
+[[package]]
+name = "parse-size"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "487f2ccd1e17ce8c1bfab3a65c89525af41cfad4c8659021a1e9a2aacd73b89b"
 
 [[package]]
 name = "paste"
