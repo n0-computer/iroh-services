@@ -19,6 +19,8 @@
 //!
 //! - `IROH_SERVICES_API_SECRET`: the API secret from your iroh services project. This
 //!   is the only thing required to run the load test.
+//! - `IROH_RELAYS`: a comma-separated list of relay URLs to use instead of the default
+//!   public relay map. Custom relays require a pro or enterprise project.
 //!
 //! # Examples
 //!
@@ -63,11 +65,13 @@ use anyhow::{Context, Result, ensure};
 use clap::Parser;
 use data_encoding::HEXLOWER;
 use iroh::{
-    Endpoint, EndpointAddr, EndpointId, SecretKey,
+    Endpoint, EndpointAddr, EndpointId, RelayMap, RelayUrl, SecretKey,
     endpoint::{Connection, RecvStream, SendStream},
     protocol::{AcceptError, ProtocolHandler, Router},
 };
-use iroh_services::{CLIENT_HOST_ALPN, Client, ClientHost, caps::NetDiagnosticsCap};
+use iroh_services::{
+    CLIENT_HOST_ALPN, Client, ClientHost, IrohServicesPreset, caps::NetDiagnosticsCap,
+};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -154,6 +158,10 @@ struct Cli {
     /// diagnostics from it.
     #[clap(long)]
     no_diagnostics: bool,
+
+    /// Disable direct IP transports, so all traffic flows through the relays.
+    #[clap(long)]
+    relay_only: bool,
 }
 
 /// Parses a byte size like "32", "1K", or "4MiB" into a byte count.
@@ -208,11 +216,24 @@ async fn main() -> Result<()> {
         println!("Saved endpoint identities to {}", path.display());
     }
 
+    let relay_urls = relay_urls_from_env()?;
+    match &relay_urls {
+        Some(urls) => println!(
+            "Using custom relay map:\n\t- {}",
+            urls.iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n\t- ")
+        ),
+        None => println!("Using default relay map"),
+    }
+
     let server_preset = iroh_services::preset()
         .api_secret_from_env()?
         .secret_key(identities.server_key()?)
+        .relay_map(fresh_relay_map(relay_urls.as_deref()))
         .build()?;
-    let server_endpoint = Endpoint::builder(server_preset.clone()).bind().await?;
+    let server_endpoint = bind_endpoint(server_preset.clone(), cli.relay_only).await?;
     println!("Server endpoint id: {}", server_endpoint.id());
     server_endpoint.online().await;
     println!("Server is online.");
@@ -252,6 +273,7 @@ async fn main() -> Result<()> {
         tasks.spawn(run_client(
             index,
             secret_key,
+            relay_urls.clone(),
             server_endpoint.addr(),
             cli.clone(),
             diagnostics_remote,
@@ -326,6 +348,44 @@ fn decode_secret(s: &str) -> Result<SecretKey> {
     SecretKey::from_str(s).context("invalid secret key hex")
 }
 
+/// Reads relay URLs from `IROH_RELAYS`. Returns `None` to use the default relays.
+fn relay_urls_from_env() -> Result<Option<Vec<RelayUrl>>> {
+    match std::env::var("IROH_RELAYS") {
+        Ok(value) if !value.is_empty() => value
+            .split(',')
+            .map(|url| {
+                url.trim()
+                    .parse::<RelayUrl>()
+                    .with_context(|| format!("failed to parse relay URL: {url}"))
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(Some),
+        _ => Ok(None),
+    }
+}
+
+/// Binds an endpoint from `preset`, without IP transports if `relay_only` is set.
+async fn bind_endpoint(preset: IrohServicesPreset, relay_only: bool) -> Result<Endpoint> {
+    let mut builder = Endpoint::builder(preset);
+    if relay_only {
+        builder = builder.clear_ip_transports();
+    }
+    Ok(builder.bind().await?)
+}
+
+/// Builds a relay map from custom URLs, or the default public relay map.
+///
+/// Each preset needs a fresh map: `RelayMap` clones share their inner state, and
+/// the preset writes an endpoint-specific auth token into the map it is given.
+/// Sharing one map would leave every endpoint with the token of whichever preset
+/// was built last, and the relays would reject all others.
+fn fresh_relay_map(urls: Option<&[RelayUrl]>) -> RelayMap {
+    match urls {
+        Some(urls) => RelayMap::from_iter(urls.iter().cloned()),
+        None => iroh::defaults::prod::default_relay_map(),
+    }
+}
+
 /// Grants the iroh-services project at `remote_id` the capability to request network
 /// diagnostics from `client`'s endpoint. Runs in the background so it does not delay
 /// the caller; failures are only logged.
@@ -346,6 +406,7 @@ fn spawn_diagnostics_grant(client: &Client, remote_id: EndpointId) {
 async fn run_client(
     index: usize,
     secret_key: SecretKey,
+    relay_urls: Option<Vec<RelayUrl>>,
     server_addr: EndpointAddr,
     cli: Cli,
     diagnostics_remote: Option<EndpointId>,
@@ -355,8 +416,9 @@ async fn run_client(
     let preset = iroh_services::preset()
         .api_secret_from_env()?
         .secret_key(secret_key)
+        .relay_map(fresh_relay_map(relay_urls.as_deref()))
         .build()?;
-    let endpoint = Endpoint::builder(preset.clone()).bind().await?;
+    let endpoint = bind_endpoint(preset.clone(), cli.relay_only).await?;
     endpoint.online().await;
 
     let client = preset
