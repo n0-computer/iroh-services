@@ -7,6 +7,7 @@ use std::{
 use anyhow::{Result, anyhow, ensure};
 use iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectError};
 use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
+use irpc::{Channels, RpcMessage, WithChannels, channel::none::NoReceiver};
 use irpc_iroh::IrohLazyRemoteConnection;
 use n0_error::StackResultExt;
 use n0_future::{task::AbortOnDropHandle, time::Duration};
@@ -20,8 +21,8 @@ use crate::{
     caps::{Caps, DEFAULT_CAP_EXPIRY},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
     protocol::{
-        ALPN, Auth, IrohServicesClient, NameEndpoint, Ping, Pong, PutMetrics,
-        PutNetworkDiagnostics, RemoteError, SetAttributes, SetGroup,
+        ALPN, Auth, IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong, PutMetrics,
+        PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
     },
 };
 
@@ -641,7 +642,7 @@ struct ClientActor {
     session_id: Uuid,
     authorized: bool,
     encoder: Encoder,
-    // Kept so auth() can rebuild the encoder; a fresh encoder re-sends the schema.
+    /// Kept so auth() can rebuild the encoder to re-send the metrics schema.
     registry: Arc<RwLock<Registry>>,
 }
 
@@ -804,52 +805,45 @@ impl ClientActor {
         Ok(())
     }
 
-    /// Marks the session unauthorized when an rpc fails.
-    ///
-    /// The lazy connection re-dials on the next request, and the server
-    /// accepts only Auth first on a new connection, so the next call must run
-    /// the handshake again (which also re-sends the metrics schema).
-    fn track_rpc<T>(&mut self, res: Result<T, irpc::Error>) -> Result<T, irpc::Error> {
+    async fn rpc<Req, Res>(&mut self, msg: Req) -> Result<Res, RemoteError>
+    where
+        IrohServicesProtocol: From<Req>,
+        ServicesMessage: From<WithChannels<Req, IrohServicesProtocol>>,
+        Req: Channels<
+                IrohServicesProtocol,
+                Tx = irpc::channel::oneshot::Sender<Res>,
+                Rx = NoReceiver,
+            >,
+        Res: RpcMessage,
+    {
+        self.auth().await?;
+        let res = self.client.rpc(msg).await;
         if res.is_err() {
             self.authorized = false;
         }
-        res
+        res.inspect_err(|e| warn!("rpc error: {e}"))
+            .map_err(|_| RemoteError::InternalServerError)
     }
 
     async fn send_ping(&mut self) -> Result<Pong, RemoteError> {
         trace!("client actor send ping");
-        self.auth().await?;
-
         let req = rand::random();
-        let res = self.client.rpc(Ping { req_id: req }).await;
-        self.track_rpc(res)
-            .inspect_err(|e| warn!("rpc ping error: {e}"))
-            .map_err(|_| RemoteError::InternalServerError)
+        self.rpc(Ping { req_id: req }).await
     }
 
     async fn send_name_endpoint(&mut self, name: String) -> Result<(), RemoteError> {
         trace!("client sending name endpoint request");
-        self.auth().await?;
-
-        let res = self.client.rpc(NameEndpoint { name: name.clone() }).await;
-        self.track_rpc(res)
-            .inspect_err(|e| debug!("name endpoint error: {e}"))
-            .map_err(|_| RemoteError::InternalServerError)??;
+        self.rpc(NameEndpoint { name: name.clone() }).await??;
         self.name = Some(name);
         Ok(())
     }
 
     async fn send_set_group(&mut self, group: String) -> Result<(), RemoteError> {
         trace!("client sending set group request");
-        self.auth().await?;
-
-        self.client
-            .rpc(SetGroup {
-                group: group.clone(),
-            })
-            .await
-            .inspect_err(|e| debug!("set group error: {e}"))
-            .map_err(|_| RemoteError::InternalServerError)??;
+        self.rpc(SetGroup {
+            group: group.clone(),
+        })
+        .await??;
         self.group = Some(group);
         Ok(())
     }
@@ -859,45 +853,29 @@ impl ClientActor {
         attributes: BTreeMap<String, String>,
     ) -> Result<(), RemoteError> {
         trace!("client sending set attributes request");
-        self.auth().await?;
-
-        self.client
-            .rpc(SetAttributes {
-                attributes: attributes.clone(),
-            })
-            .await
-            .inspect_err(|e| debug!("set attributes error: {e}"))
-            .map_err(|_| RemoteError::InternalServerError)??;
+        self.rpc(SetAttributes {
+            attributes: attributes.clone(),
+        })
+        .await??;
         self.attributes = attributes;
         Ok(())
     }
 
     async fn send_metrics(&mut self) -> Result<(), RemoteError> {
         trace!("client actor send metrics");
-        self.auth().await?;
-
         let update = self.encoder.export();
         // let delta = update_delta(&self.latest_ackd_update, &update);
         let req = PutMetrics {
             session_id: self.session_id,
             update,
         };
-
-        let res = self.client.rpc(req).await;
-        self.track_rpc(res)
-            .map_err(|_| RemoteError::InternalServerError)??;
-
+        self.rpc(req).await??;
         Ok(())
     }
 
     async fn grant_cap(&mut self, cap: Rcan<Caps>) -> Result<(), Error> {
         trace!("client actor grant capability");
-        self.auth().await?;
-
-        let res = self.client.rpc(crate::protocol::GrantCap { cap }).await;
-        self.track_rpc(res)
-            .map_err(|_| RemoteError::InternalServerError)??;
-
+        self.rpc(crate::protocol::GrantCap { cap }).await??;
         Ok(())
     }
 
@@ -906,14 +884,8 @@ impl ClientActor {
         report: crate::net_diagnostics::DiagnosticsReport,
     ) -> Result<(), Error> {
         trace!("client actor publish network diagnostics");
-        self.auth().await?;
-
         let req = PutNetworkDiagnostics { report };
-
-        let res = self.client.rpc(req).await;
-        self.track_rpc(res)
-            .map_err(|_| RemoteError::InternalServerError)??;
-
+        self.rpc(req).await??;
         Ok(())
     }
 }
