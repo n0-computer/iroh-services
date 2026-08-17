@@ -1,9 +1,9 @@
 (function() {
-    const implementors = Object.fromEntries([["iroh_services",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"iroh_services/protocol/enum.RemoteError.html\" title=\"enum iroh_services::protocol::RemoteError\">RemoteError</a>",0]]]]);
+    const implementors = Object.fromEntries([["iroh_services",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"iroh_services/enum.BuildError.html\" title=\"enum iroh_services::BuildError\">BuildError</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"iroh_services/enum.Error.html\" title=\"enum iroh_services::Error\">Error</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"iroh_services/enum.ValidateAttributesError.html\" title=\"enum iroh_services::ValidateAttributesError\">ValidateAttributesError</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"iroh_services/enum.ValidateNameError.html\" title=\"enum iroh_services::ValidateNameError\">ValidateNameError</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"iroh_services/protocol/enum.RemoteError.html\" title=\"enum iroh_services::protocol::RemoteError\">RemoteError</a>",0]]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
         window.pending_implementors = implementors;
     }
 })()
-//{"start":59,"fragment_lengths":[309]}
+//{"start":59,"fragment_lengths":[1426]}
