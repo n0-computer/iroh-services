@@ -522,6 +522,7 @@ impl Client {
             .await
             .is_err()
         {
+            trace!("Shutdown called but actor already stopped");
             // actor already stopped
             return;
         }
@@ -748,7 +749,7 @@ impl ClientActor {
                                 warn!("failed to publish network diagnostics: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::Shutdown{ done } => {
+                        ClientActorMessage::Shutdown { done } => {
                             if metrics_timer.is_some()
                                 && let Err(err) = self.send_metrics(&mut encoder).await
                             {
