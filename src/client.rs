@@ -5,10 +5,13 @@ use std::{
 };
 
 use anyhow::{Result, anyhow, ensure};
-use iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectError};
+use iroh::{
+    Endpoint, EndpointAddr, EndpointId,
+    endpoint::{ConnectError, Connection},
+};
 use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
 use irpc::{Channels, RpcMessage, WithChannels, channel::none::NoReceiver};
-use irpc_iroh::IrohLazyRemoteConnection;
+use irpc_iroh::IrohRemoteConnection;
 use n0_error::StackResultExt;
 use n0_future::{task::AbortOnDropHandle, time::Duration};
 use rcan::Rcan;
@@ -257,20 +260,18 @@ impl ClientBuilder {
         let remote = self.remote.ok_or(BuildError::MissingRemote)?;
         let capabilities = self.cap.ok_or(BuildError::MissingCapability)?;
 
-        let conn = IrohLazyRemoteConnection::new(self.endpoint.clone(), remote, ALPN.to_vec());
-        let irpc_client = IrohServicesClient::boxed(conn);
-
         let registry = Arc::new(RwLock::new(self.registry));
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         let actor_task = AbortOnDropHandle::new(n0_future::task::spawn(
             ClientActor {
                 capabilities,
-                client: irpc_client,
+                endpoint: self.endpoint.clone(),
+                remote,
+                client: None,
                 name: self.name.clone(),
                 group: self.group.clone(),
                 attributes: self.attributes.clone().unwrap_or_default(),
                 session_id: Uuid::new_v4(),
-                authorized: false,
                 encoder: Encoder::new(registry.clone()),
                 registry,
             }
@@ -286,6 +287,7 @@ impl ClientBuilder {
 }
 
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum BuildError {
     #[error("Missing remote endpoint to dial")]
     MissingRemote,
@@ -379,6 +381,7 @@ fn validate_attributes(attrs: &BTreeMap<String, String>) -> Result<(), ValidateA
 }
 
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     #[error("Invalid endpoint name: {0}")]
     InvalidName(#[from] ValidateNameError),
@@ -389,6 +392,8 @@ pub enum Error {
     #[error("Remote error: {0}")]
     Remote(#[from] RemoteError),
     #[error("Connection error: {0}")]
+    Connect(#[from] ConnectError),
+    #[error("Rpc error: {0}")]
     Rpc(#[from] irpc::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
@@ -492,7 +497,6 @@ impl Client {
 
         rx.await
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
-            .map_err(Error::Remote)
     }
 
     /// immediately send a single dump of metrics to iroh-services. It's not necessary
@@ -507,7 +511,6 @@ impl Client {
 
         rx.await
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
-            .map_err(Error::Remote)
     }
 
     /// Shuts down the client, pushing one final round of metrics first.
@@ -586,10 +589,10 @@ impl Client {
 
 enum ClientActorMessage {
     SendMetrics {
-        done: oneshot::Sender<Result<(), RemoteError>>,
+        done: oneshot::Sender<Result<(), Error>>,
     },
     Ping {
-        done: oneshot::Sender<Result<Pong, RemoteError>>,
+        done: oneshot::Sender<Result<Pong, Error>>,
     },
     // GrantCap is used by the `client_host` feature flag
     #[allow(dead_code)]
@@ -610,15 +613,15 @@ enum ClientActorMessage {
     },
     NameEndpoint {
         name: String,
-        done: oneshot::Sender<Result<(), RemoteError>>,
+        done: oneshot::Sender<Result<(), Error>>,
     },
     SetGroup {
         group: String,
-        done: oneshot::Sender<Result<(), RemoteError>>,
+        done: oneshot::Sender<Result<(), Error>>,
     },
     SetAttributes {
         attributes: BTreeMap<String, String>,
-        done: oneshot::Sender<Result<(), RemoteError>>,
+        done: oneshot::Sender<Result<(), Error>>,
     },
     SetAttribute {
         key: String,
@@ -633,16 +636,58 @@ enum ClientActorMessage {
     },
 }
 
+/// An irpc client bound to a single authenticated connection.
+///
+/// The server accepts requests only after an `Auth` as the very first
+/// request on a connection, so [`RpcClient::connect`] dials and
+/// authenticates in one step; a value of this type never exists
+/// unauthenticated.
+struct RpcClient {
+    /// Kept alongside the irpc client to detect a remote close.
+    connection: Connection,
+    irpc: IrohServicesClient,
+}
+
+impl RpcClient {
+    /// Dials the remote and authenticates as the connection's first request.
+    async fn connect(
+        endpoint: &Endpoint,
+        remote: EndpointAddr,
+        caps: Rcan<Caps>,
+    ) -> Result<Self, Error> {
+        trace!("client connecting and authorizing");
+        let connection = endpoint
+            .connect(remote, ALPN)
+            .await
+            .inspect_err(|err| debug!("connect failed: {err:?}"))?;
+        let irpc = IrohServicesClient::boxed(IrohRemoteConnection::new(connection.clone()));
+        irpc.rpc(Auth { caps })
+            .await
+            .inspect_err(|err| debug!("authorization failed: {err:?}"))
+            .map_err(|err| RemoteError::AuthError(err.to_string()))?;
+        Ok(Self { connection, irpc })
+    }
+}
+
 struct ClientActor {
     capabilities: Rcan<Caps>,
-    client: IrohServicesClient,
+    endpoint: Endpoint,
+    remote: EndpointAddr,
+    /// The active authenticated connection, established on demand.
+    ///
+    /// The actor owns the connection lifecycle rather than using a lazy
+    /// reconnecting client: the server requires `Auth` as the first request
+    /// on every connection, so a transparent mid-request reconnect would send
+    /// an unauthenticated request that the server rejects. [`Self::connect`]
+    /// establishes this; [`Self::rpc`] clears it on transport errors so the
+    /// next request re-dials and re-authenticates.
+    client: Option<RpcClient>,
     name: Option<String>,
     group: Option<String>,
     attributes: BTreeMap<String, String>,
     session_id: Uuid,
-    authorized: bool,
     encoder: Encoder,
-    /// Kept so auth() can rebuild the encoder to re-send the metrics schema.
+    /// Kept so connect() can rebuild the encoder to re-send the metrics schema.
     registry: Arc<RwLock<Registry>>,
 }
 
@@ -681,7 +726,7 @@ impl ClientActor {
                 biased;
                 Some(msg) = inbox.recv() => {
                     match msg {
-                        ClientActorMessage::Ping{ done } => {
+                        ClientActorMessage::Ping { done } => {
                             let res = self.send_ping().await;
                             if let Err(err) = done.send(res) {
                                 debug!("failed to send ping: {:#?}", err);
@@ -737,7 +782,7 @@ impl ClientActor {
                             merged.insert(key, value);
                             let res = match validate_attributes(&merged) {
                                 Ok(()) => {
-                                    self.send_set_attributes(merged).await.map_err(Error::Remote)
+                                    self.send_set_attributes(merged).await
                                 }
                                 Err(err) => Err(Error::from(err)),
                             };
@@ -779,30 +824,35 @@ impl ClientActor {
         debug!("client actor shut down");
     }
 
-    // sends an authorization request to the server
-    async fn auth(&mut self) -> Result<(), RemoteError> {
-        if self.authorized {
-            return Ok(());
+    /// Returns the client for the active connection, establishing one if needed.
+    ///
+    /// The server keeps one metrics decoder per connection, so a fresh
+    /// connection also gets a fresh encoder: the next metrics export then
+    /// carries the full schema for the server's fresh decoder.
+    async fn connect(&mut self) -> Result<&IrohServicesClient, Error> {
+        // A connection the remote has closed (server restart, error close)
+        // can't carry requests anymore; drop it and re-dial.
+        if let Some(client) = &self.client
+            && let Some(reason) = client.connection.close_reason()
+        {
+            debug!(%reason, "connection closed by remote, reconnecting");
+            self.client = None;
         }
-        trace!("client authorizing");
-        self.client
-            .rpc(Auth {
-                caps: self.capabilities.clone(),
-            })
-            .await
-            .inspect_err(|e| debug!("authorization failed: {:?}", e))
-            .map_err(|e| RemoteError::AuthError(e.to_string()))?;
-        self.authorized = true;
-        // A completed handshake means a fresh connection, and the server keeps
-        // one metrics decoder per connection. A new encoder starts at schema
-        // version zero, so the next export carries the full schema for that
-        // decoder. Re-importing a schema is idempotent server-side, so
-        // re-sending after a spurious re-auth is harmless.
-        self.encoder = Encoder::new(self.registry.clone());
-        Ok(())
+        if self.client.is_none() {
+            let client = RpcClient::connect(
+                &self.endpoint,
+                self.remote.clone(),
+                self.capabilities.clone(),
+            )
+            .await?;
+            // Recreate the metrics encoder to force sending the schema on the next metrics push.
+            self.encoder = Encoder::new(self.registry.clone());
+            self.client = Some(client);
+        }
+        Ok(&self.client.as_ref().expect("just checked").irpc)
     }
 
-    async fn rpc<Req, Res>(&mut self, msg: Req) -> Result<Res, RemoteError>
+    async fn rpc<Req, Res>(&mut self, msg: Req) -> Result<Res, Error>
     where
         IrohServicesProtocol: From<Req>,
         ServicesMessage: From<WithChannels<Req, IrohServicesProtocol>>,
@@ -813,29 +863,33 @@ impl ClientActor {
             >,
         Res: RpcMessage,
     {
-        self.auth().await?;
-        let res = self.client.rpc(msg).await;
+        let client = self.connect().await?;
+        let res = client.rpc(msg).await;
         if res.is_err() {
-            self.authorized = false;
+            // A transport-level failure means the connection is gone or in an
+            // unknown state; the next request dials and authenticates afresh.
+            // Server-side errors arrive as `Ok(Err(RemoteError))` and keep the
+            // connection.
+            self.client = None;
         }
-        res.inspect_err(|e| warn!("rpc error: {e}"))
-            .map_err(|_| RemoteError::InternalServerError)
+        res.inspect_err(|err| warn!("rpc error: {err}"))
+            .map_err(Error::from)
     }
 
-    async fn send_ping(&mut self) -> Result<Pong, RemoteError> {
+    async fn send_ping(&mut self) -> Result<Pong, Error> {
         trace!("client actor send ping");
         let req = rand::random();
         self.rpc(Ping { req_id: req }).await
     }
 
-    async fn send_name_endpoint(&mut self, name: String) -> Result<(), RemoteError> {
+    async fn send_name_endpoint(&mut self, name: String) -> Result<(), Error> {
         trace!("client sending name endpoint request");
         self.rpc(NameEndpoint { name: name.clone() }).await??;
         self.name = Some(name);
         Ok(())
     }
 
-    async fn send_set_group(&mut self, group: String) -> Result<(), RemoteError> {
+    async fn send_set_group(&mut self, group: String) -> Result<(), Error> {
         trace!("client sending set group request");
         self.rpc(SetGroup {
             group: group.clone(),
@@ -848,7 +902,7 @@ impl ClientActor {
     async fn send_set_attributes(
         &mut self,
         attributes: BTreeMap<String, String>,
-    ) -> Result<(), RemoteError> {
+    ) -> Result<(), Error> {
         trace!("client sending set attributes request");
         self.rpc(SetAttributes {
             attributes: attributes.clone(),
@@ -858,8 +912,12 @@ impl ClientActor {
         Ok(())
     }
 
-    async fn send_metrics(&mut self) -> Result<(), RemoteError> {
+    async fn send_metrics(&mut self) -> Result<(), Error> {
         trace!("client actor send metrics");
+        // Connecting replaces the encoder, so it must happen before the
+        // export: the first update on a fresh connection has to carry the
+        // schema for the server's fresh decoder.
+        self.connect().await?;
         let update = self.encoder.export();
         // let delta = update_delta(&self.latest_ackd_update, &update);
         let req = PutMetrics {
@@ -900,7 +958,6 @@ async fn set_name_inner(
         .map_err(|_| Error::Other(anyhow!("sending name endpoint request")))?;
     rx.await
         .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
-        .map_err(Error::Remote)
 }
 
 async fn set_group_inner(
@@ -916,7 +973,6 @@ async fn set_group_inner(
         .map_err(|_| Error::Other(anyhow!("sending set group request")))?;
     rx.await
         .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
-        .map_err(Error::Remote)
 }
 
 async fn set_attributes_inner(
@@ -935,7 +991,6 @@ async fn set_attributes_inner(
         .map_err(|_| Error::Other(anyhow!("sending set attributes request")))?;
     rx.await
         .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
-        .map_err(Error::Remote)
 }
 
 async fn set_attribute_inner(
@@ -1007,7 +1062,8 @@ mod tests {
     /// In-process stand-in for the services backend.
     ///
     /// Mirrors the real server's session rules: the first request on every
-    /// connection must be Auth, and the metrics decoder lives per connection.
+    /// connection must be Auth, a repeat Auth on a live connection closes it,
+    /// and the metrics decoder lives per connection.
     #[derive(Debug)]
     struct RecordingServer {
         seen: tokio::sync::mpsc::UnboundedSender<SeenUpdate>,
@@ -1025,8 +1081,17 @@ mod tests {
 
     impl RecordingServer {
         async fn handle_connection(&self, connection: Connection) -> anyhow::Result<()> {
+            let Some(first_request) = read_request::<IrohServicesProtocol>(&connection).await?
+            else {
+                return Ok(());
+            };
+            let ServicesMessage::Auth(WithChannels { tx, .. }) = first_request else {
+                connection.close(400u32.into(), b"Expected initial auth message");
+                return Ok(());
+            };
+            tx.send(()).await?;
+
             let mut decoder = Decoder::default();
-            let mut authed = false;
             loop {
                 let Some(request) = read_request::<IrohServicesProtocol>(&connection).await? else {
                     return Ok(());
@@ -1038,11 +1103,11 @@ mod tests {
                     return Ok(());
                 }
                 match request {
-                    ServicesMessage::Auth(WithChannels { tx, .. }) => {
-                        authed = true;
-                        tx.send(()).await?;
+                    ServicesMessage::Auth(_) => {
+                        connection.close(400u32.into(), b"Unexpected auth message");
+                        anyhow::bail!("client re-sent auth on a live connection");
                     }
-                    ServicesMessage::PutMetrics(WithChannels { inner, tx, .. }) if authed => {
+                    ServicesMessage::PutMetrics(WithChannels { inner, tx, .. }) => {
                         let has_schema = inner.update.schema.is_some();
                         decoder.import(inner.update);
                         let decoded_items = decoder.iter().count();
@@ -1053,8 +1118,8 @@ mod tests {
                         tx.send(Ok(())).await?;
                     }
                     _ => {
-                        connection.close(400u32.into(), b"Expected initial auth message");
-                        return Ok(());
+                        connection.close(400u32.into(), b"Unexpected message in test");
+                        anyhow::bail!("unexpected message in test");
                     }
                 }
             }
@@ -1106,12 +1171,21 @@ mod tests {
         assert!(first.has_schema);
         assert!(first.decoded_items > 0);
 
-        // Steady state suppresses the schema; the connection's decoder
-        // already has it and keeps decoding.
-        client.push_metrics().await.unwrap();
-        let second = seen_rx.recv().await.unwrap();
-        assert!(!second.has_schema);
-        assert!(second.decoded_items > 0);
+        // Steady state stops sending the schema. The endpoint's own metric
+        // families may still grow for a few exports right after connecting
+        // (each growth re-publishes the schema), so push until the schema
+        // settles; the connection's decoder keeps decoding throughout.
+        let mut settled = false;
+        for _ in 0..20 {
+            client.push_metrics().await.unwrap();
+            let seen = seen_rx.recv().await.unwrap();
+            assert!(seen.decoded_items > 0);
+            if !seen.has_schema {
+                settled = true;
+                break;
+            }
+        }
+        assert!(settled, "schema must stop being sent once it is unchanged");
 
         // The server drops the connection mid-request: one failed round trip.
         drop_next.store(true, Ordering::SeqCst);
@@ -1475,14 +1549,14 @@ mod tests {
             ))
         ));
 
-        // A valid single attribute passes validation, then reaches the remote
-        // layer (no server) and surfaces a remote error, proving set_attribute
+        // A valid single attribute passes validation, then reaches the dial
+        // (no server) and surfaces a connect error, proving set_attribute
         // is wired through the actor/RPC path.
         let err = client
             .set_attribute("firmware", "2.1.0")
             .await
             .expect_err("no server: remote call must fail after validation passes");
-        assert!(matches!(err, Error::Remote(_)), "got {err:?}");
+        assert!(matches!(err, Error::Connect(_)), "got {err:?}");
     }
 
     #[tokio::test]
@@ -1525,8 +1599,8 @@ mod tests {
 
     /// Boundary "accepted" case for the runtime setter. Without a live server we
     /// cannot assert success; instead we assert the input passes local validation
-    /// and the call proceeds to the (failing) remote layer, surfacing
-    /// `Error::Remote` rather than an `Error::InvalidAttributes` validation error.
+    /// and the call proceeds to the (failing) dial, surfacing `Error::Connect`
+    /// rather than an `Error::InvalidAttributes` validation error.
     #[tokio::test]
     async fn test_set_attributes_runtime_boundary_accepted() {
         let client = build_serverless_client(4).await;
@@ -1538,8 +1612,8 @@ mod tests {
             .await
             .expect_err("no server: remote call must fail after validation passes");
         assert!(
-            matches!(err, Error::Remote(_)),
-            "expected a remote error (validation accepted), got {err:?}"
+            matches!(err, Error::Connect(_)),
+            "expected a connect error (validation accepted), got {err:?}"
         );
 
         // exactly CLIENT_ATTRIBUTES_MAX_COUNT entries is accepted by validation
@@ -1551,8 +1625,8 @@ mod tests {
             .await
             .expect_err("no server: remote call must fail after validation passes");
         assert!(
-            matches!(err, Error::Remote(_)),
-            "expected a remote error (validation accepted), got {err:?}"
+            matches!(err, Error::Connect(_)),
+            "expected a connect error (validation accepted), got {err:?}"
         );
     }
 }
