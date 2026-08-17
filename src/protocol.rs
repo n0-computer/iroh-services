@@ -95,20 +95,23 @@ pub enum RemoteError {
 }
 
 /// Authentication on first request
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, derive_more::Display, Serialize, Deserialize)]
+#[display("Auth")]
 pub struct Auth {
     pub caps: Rcan<Caps>,
 }
 
 /// Request to store the given metrics data
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, derive_more::Display, Serialize, Deserialize)]
+#[display("PutMetrics")]
 pub struct PutMetrics {
     pub session_id: Uuid,
     pub update: iroh_metrics::encoding::Update,
 }
 
 /// Simple ping requests
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, derive_more::Display, Serialize, Deserialize)]
+#[display("Ping")]
 pub struct Ping {
     pub req_id: [u8; 16],
 }
@@ -120,7 +123,8 @@ pub struct Pong {
 }
 
 /// Publishing network diagnostics
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, derive_more::Display, Serialize, Deserialize)]
+#[display("PutNetworkDiagnostics")]
 pub struct PutNetworkDiagnostics {
     pub report: crate::net_diagnostics::DiagnosticsReport,
 }
@@ -128,30 +132,35 @@ pub struct PutNetworkDiagnostics {
 /// ask this node to run diagnostics & return the result.
 /// present even without the net_diagnostics feature flag because the request
 /// struct is empty in both cases
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, derive_more::Display, Serialize, Deserialize)]
+#[display("RunNetworkDiagnostics")]
 pub struct RunNetworkDiagnostics;
 
 /// Grant a capability token to the remote endpoint. The remote should store
 /// the RCAN and use it when dialing back to authorize its requests.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, derive_more::Display, Serialize, Deserialize)]
+#[display("GrantCap")]
 pub struct GrantCap {
     pub cap: Rcan<Caps>,
 }
 
 /// Label the client endpoint cloud-side with a string identifier.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, derive_more::Display, Serialize, Deserialize)]
+#[display("NameEndpoint")]
 pub struct NameEndpoint {
     pub name: String,
 }
 
 /// Attach the client endpoint to a single named group cloud-side.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, derive_more::Display, Serialize, Deserialize)]
+#[display("SetGroup")]
 pub struct SetGroup {
     pub group: String,
 }
 
 /// Replace the arbitrary key-value attributes on the client endpoint cloud-side.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, derive_more::Display, Serialize, Deserialize)]
+#[display("SetAttributes")]
 pub struct SetAttributes {
     pub attributes: BTreeMap<String, String>,
 }

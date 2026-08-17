@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    fmt::Display,
     str::FromStr,
     sync::{Arc, RwLock},
 };
@@ -860,9 +861,10 @@ impl ClientActor {
                 IrohServicesProtocol,
                 Tx = irpc::channel::oneshot::Sender<Res>,
                 Rx = NoReceiver,
-            >,
+            > + Display,
         Res: RpcMessage,
     {
+        trace!(request = %msg, "client actor send request");
         let client = self.connect().await?;
         let res = client.rpc(msg).await;
         if res.is_err() {
@@ -877,20 +879,17 @@ impl ClientActor {
     }
 
     async fn send_ping(&mut self) -> Result<Pong, Error> {
-        trace!("client actor send ping");
         let req = rand::random();
         self.rpc(Ping { req_id: req }).await
     }
 
     async fn send_name_endpoint(&mut self, name: String) -> Result<(), Error> {
-        trace!("client sending name endpoint request");
         self.rpc(NameEndpoint { name: name.clone() }).await??;
         self.name = Some(name);
         Ok(())
     }
 
     async fn send_set_group(&mut self, group: String) -> Result<(), Error> {
-        trace!("client sending set group request");
         self.rpc(SetGroup {
             group: group.clone(),
         })
@@ -903,7 +902,6 @@ impl ClientActor {
         &mut self,
         attributes: BTreeMap<String, String>,
     ) -> Result<(), Error> {
-        trace!("client sending set attributes request");
         self.rpc(SetAttributes {
             attributes: attributes.clone(),
         })
@@ -913,7 +911,6 @@ impl ClientActor {
     }
 
     async fn send_metrics(&mut self) -> Result<(), Error> {
-        trace!("client actor send metrics");
         // Connecting replaces the encoder, so it must happen before the
         // export: the first update on a fresh connection has to carry the
         // schema for the server's fresh decoder.
@@ -929,7 +926,6 @@ impl ClientActor {
     }
 
     async fn grant_cap(&mut self, cap: Rcan<Caps>) -> Result<(), Error> {
-        trace!("client actor grant capability");
         self.rpc(crate::protocol::GrantCap { cap }).await??;
         Ok(())
     }
@@ -938,7 +934,6 @@ impl ClientActor {
         &mut self,
         report: crate::net_diagnostics::DiagnosticsReport,
     ) -> Result<(), Error> {
-        trace!("client actor publish network diagnostics");
         let req = PutNetworkDiagnostics { report };
         self.rpc(req).await??;
         Ok(())
