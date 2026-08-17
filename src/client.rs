@@ -685,52 +685,50 @@ impl ClientActor {
                             let res = self.send_ping().await;
                             if let Err(err) = done.send(res) {
                                 debug!("failed to send ping: {:#?}", err);
-                                self.authorized = false;
                             }
                         },
-                        ClientActorMessage::SendMetrics{ done } => {
+                        ClientActorMessage::SendMetrics { done } => {
                             trace!("sending metrics manually triggered");
                             let res = self.send_metrics().await;
                             if let Err(err) = done.send(res) {
                                 debug!("failed to push metrics: {:#?}", err);
-                                self.authorized = false;
                             }
                         }
-                        ClientActorMessage::GrantCap{ cap, done } => {
+                        ClientActorMessage::GrantCap { cap, done } => {
                             let res = self.grant_cap(*cap).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to grant capability: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::ReadName{ done } => {
+                        ClientActorMessage::ReadName { done } => {
                             if let Err(err) = done.send(self.name.clone()) {
                                 warn!("sending name value: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::ReadGroup{ done } => {
+                        ClientActorMessage::ReadGroup { done } => {
                             if let Err(err) = done.send(self.group.clone()) {
                                 warn!("sending group value: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::NameEndpoint{ name, done } => {
+                        ClientActorMessage::NameEndpoint { name, done } => {
                             let res = self.send_name_endpoint(name).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to name endpoint: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::SetGroup{ group, done } => {
+                        ClientActorMessage::SetGroup { group, done } => {
                             let res = self.send_set_group(group).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to set group: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::SetAttributes{ attributes, done } => {
+                        ClientActorMessage::SetAttributes { attributes, done } => {
                             let res = self.send_set_attributes(attributes).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to set attributes: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::SetAttribute{ key, value, done } => {
+                        ClientActorMessage::SetAttribute { key, value, done } => {
                             // Merge into the current set and validate the union:
                             // adding one valid entry to a valid set can still
                             // exceed the max entry count, so the single entry
@@ -747,7 +745,7 @@ impl ClientActor {
                                 warn!("failed to set attribute: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::PutNetworkDiagnostics{ report, done } => {
+                        ClientActorMessage::PutNetworkDiagnostics { report, done } => {
                             let res = self.put_network_diagnostics(*report).await;
                             if let Err(err) = done.send(res) {
                                 warn!("failed to publish network diagnostics: {:#?}", err);
@@ -774,7 +772,6 @@ impl ClientActor {
                     trace!("metrics send tick");
                     if let Err(err) = self.send_metrics().await {
                         debug!("failed to push metrics: {:#?}", err);
-                        self.authorized = false;
                     }
                 },
             }
