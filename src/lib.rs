@@ -61,7 +61,9 @@ pub use iroh_metrics::Registry;
 
 pub use self::{
     api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
-    client::{Client, ClientBuilder},
+    client::{
+        BuildError, Client, ClientBuilder, Error, ValidateAttributesError, ValidateNameError,
+    },
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
     preset::{IrohServicesPreset, PresetBuilder, preset},
     protocol::ALPN,
