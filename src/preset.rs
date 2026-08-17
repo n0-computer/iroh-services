@@ -16,7 +16,9 @@
 //!         .relays(["https://us-east1.project_username.iroh.link"])?
 //!         .api_secret_from_env()?
 //!         .build()?;
-//!     let endpoint = Endpoint::builder(preset).bind().await?;
+//!     let endpoint = Endpoint::bind(preset.clone()).await?;
+//!     // the preset hands its api secret to the client, so you don't pass it twice
+//!     let _client = preset.client_builder(&endpoint).build().await?;
 //!     Ok(())
 //! }
 //! ```
@@ -90,6 +92,20 @@ pub struct PresetBuilder {
 /// Start a new [`IrohServicesPreset`] builder seeded with iroh-services
 /// defaults: the n0 production relay map and no explicit secret key (the
 /// endpoint will generate one at bind time).
+///
+/// The built preset applies [`iroh::endpoint::presets::N0`] and then overlays
+/// its relay map, so leaving [`PresetBuilder::relays`] unset gives you plain
+/// `N0` plus a project access token for the public relays:
+///
+/// ```no_run
+/// # async fn run() -> anyhow::Result<()> {
+/// let preset = iroh_services::preset().api_secret_from_env()?.build()?;
+/// let endpoint = iroh::Endpoint::bind(preset.clone()).await?;
+/// // reuses the preset's api secret, no need to pass it twice
+/// let client = preset.client_builder(&endpoint).build().await?;
+/// # Ok(())
+/// # }
+/// ```
 pub fn preset() -> PresetBuilder {
     PresetBuilder {
         cap_expiry: DEFAULT_CAP_EXPIRY,

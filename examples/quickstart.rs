@@ -1,19 +1,22 @@
-use iroh::{Endpoint, endpoint::presets};
-use iroh_services::Client;
+use iroh::Endpoint;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let endpoint = Endpoint::bind(presets::N0).await?;
+    // needs IROH_SERVICES_API_SECRET set as an environment variable.
+    // uses the public n0 relays; see the `relays` example for custom relays.
+    let preset = iroh_services::preset().api_secret_from_env()?.build()?;
 
+    let endpoint = Endpoint::bind(preset.clone()).await?;
     // Wait for the endpoint to be online
     endpoint.online().await;
 
-    // needs IROH_SERVICES_API_SECRET set to an environment variable
+    // client_builder reuses the preset's api secret, which also carries the
+    // iroh-services endpoint address to dial.
     // client will now push endpoint metrics to iroh-services
-    let client = Client::builder(&endpoint)
-        .api_secret_from_env()?
+    let client = preset
+        .client_builder(&endpoint)
         .name("quickstart-example")?
         .build()
         .await?;
