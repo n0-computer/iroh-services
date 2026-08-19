@@ -99,14 +99,14 @@ pub enum RemoteError {
     RateLimited,
 }
 
-/// Authentication on first request.
+/// Authentication on first request
 #[derive(Debug, derive_more::Display, Serialize, Deserialize)]
 #[display("Auth")]
 pub struct Auth {
     pub caps: Rcan<Caps>,
 }
 
-/// Request to store the given metrics data.
+/// Request to store the given metrics data
 #[derive(Debug, derive_more::Display, Serialize, Deserialize)]
 #[display("PutMetrics")]
 pub struct PutMetrics {
@@ -114,39 +114,42 @@ pub struct PutMetrics {
     pub update: iroh_metrics::encoding::Update,
 }
 
-/// Simple ping request.
+/// Simple ping requests
 #[derive(Debug, derive_more::Display, Serialize, Deserialize)]
 #[display("Ping")]
 pub struct Ping {
     pub req_id: [u8; 16],
 }
 
-/// Simple ping response.
+/// Simple ping response
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Pong {
     pub req_id: [u8; 16],
 }
 
-/// Publishes network diagnostics.
+/// Publishing network diagnostics
 #[derive(Debug, derive_more::Display, Serialize, Deserialize)]
 #[display("PutNetworkDiagnostics")]
 pub struct PutNetworkDiagnostics {
     pub report: DiagnosticsReport,
 }
 
-/// Asks this node to run diagnostics and return the result.
+/// ask this node to run diagnostics & return the result.
+/// present even without the net_diagnostics feature flag because the request
+/// struct is empty in both cases
 #[derive(Debug, derive_more::Display, Serialize, Deserialize)]
 #[display("RunNetworkDiagnostics")]
 pub struct RunNetworkDiagnostics;
 
-/// Grants a capability token to the remote endpoint.
+/// Grant a capability token to the remote endpoint. The remote should store
+/// the RCAN and use it when dialing back to authorize its requests.
 #[derive(Debug, derive_more::Display, Serialize, Deserialize)]
 #[display("GrantCap")]
 pub struct GrantCap {
     pub cap: Rcan<Caps>,
 }
 
-/// Labels the client endpoint cloud-side with a string identifier.
+/// Label the client endpoint cloud-side with a string identifier.
 #[derive(Debug, derive_more::Display, Serialize, Deserialize)]
 #[display("NameEndpoint")]
 pub struct NameEndpoint {
@@ -172,10 +175,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use ed25519_dalek::SigningKey;
-    use rcan::Expires;
+    use rcan::{Expires, Rcan};
 
-    use super::*;
-    use crate::caps::RelayCap;
+    use super::{Auth, RemoteError, SetAttributes, SetGroup};
+    use crate::caps::{Caps, RelayCap};
 
     #[test]
     fn auth_wire_encoding_is_stable() {
@@ -201,42 +204,56 @@ mod tests {
     }
 
     #[test]
-    fn remote_error_wire_encoding_is_stable() {
-        let idx = |error: &RemoteError| postcard::to_stdvec(error).expect("encode")[0];
+    fn test_remote_error_wire_compat() {
+        // postcard encodes enum variants by their index. v1 clients only know
+        // the first three RemoteError variants, so these indices are a frozen
+        // wire contract; new variants must be appended after them.
+        let idx = |e: &RemoteError| postcard::to_stdvec(e).expect("encode")[0];
         assert_eq!(idx(&RemoteError::AuthError(String::new())), 1);
         assert_eq!(idx(&RemoteError::InternalServerError), 2);
+        // v2+ variants, appended after the v1 set.
         assert_eq!(idx(&RemoteError::InvalidInput(String::new())), 3);
         assert_eq!(idx(&RemoteError::RateLimited), 4);
     }
 
+    // The wire format used by irpc is postcard. These round-trips pin the
+    // on-the-wire contract these messages share with the server.
+
     #[test]
-    fn set_group_roundtrips() {
+    fn test_set_group_serde_roundtrip() {
+        // a normal group, plus a unicode group for good measure
         for group in ["staging", "my-group 👋"] {
-            let message = SetGroup {
+            let msg = SetGroup {
                 group: group.to_string(),
             };
-            let bytes = postcard::to_stdvec(&message).expect("serialize");
-            let decoded: SetGroup = postcard::from_bytes(&bytes).expect("deserialize");
-            assert_eq!(decoded.group, message.group);
+            let bytes = postcard::to_stdvec(&msg).expect("postcard serialize");
+            let decoded: SetGroup = postcard::from_bytes(&bytes).expect("postcard deserialize");
+            assert_eq!(decoded.group, msg.group);
         }
     }
 
     #[test]
-    fn set_attributes_roundtrips() {
+    fn test_set_attributes_serde_roundtrip() {
+        // empty map: the documented "clear" case
         let empty = SetAttributes {
             attributes: BTreeMap::new(),
         };
-        let bytes = postcard::to_stdvec(&empty).expect("serialize");
-        let decoded: SetAttributes = postcard::from_bytes(&bytes).expect("deserialize");
+        let bytes = postcard::to_stdvec(&empty).expect("postcard serialize");
+        let decoded: SetAttributes = postcard::from_bytes(&bytes).expect("postcard deserialize");
+        assert!(decoded.attributes.is_empty());
         assert_eq!(decoded.attributes, empty.attributes);
 
+        // unicode key/value plus a value at exactly the documented max length
         let mut attributes = BTreeMap::new();
         attributes.insert("région 🌍".to_string(), "us-wëst 🚀".to_string());
-        attributes.insert("max".to_string(), "x".repeat(128));
+        const CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH: usize = 128;
+        let max_value = "x".repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+        assert_eq!(max_value.len(), CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+        attributes.insert("max".to_string(), max_value);
 
-        let message = SetAttributes { attributes };
-        let bytes = postcard::to_stdvec(&message).expect("serialize");
-        let decoded: SetAttributes = postcard::from_bytes(&bytes).expect("deserialize");
-        assert_eq!(decoded.attributes, message.attributes);
+        let msg = SetAttributes { attributes };
+        let bytes = postcard::to_stdvec(&msg).expect("postcard serialize");
+        let decoded: SetAttributes = postcard::from_bytes(&bytes).expect("postcard deserialize");
+        assert_eq!(decoded.attributes, msg.attributes);
     }
 }

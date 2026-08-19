@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use iroh::unstable_net_report::NetReport;
 use serde::{Deserialize, Serialize};
 
-/// A report about an iroh endpoint's network connectivity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticsReport {
     pub endpoint_id: iroh::EndpointId,

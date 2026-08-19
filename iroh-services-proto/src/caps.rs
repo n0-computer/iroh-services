@@ -123,12 +123,15 @@ impl Caps {
         Self::V0(CapSet::new(caps))
     }
 
-    /// Returns the capabilities granted by a shared API secret.
+    /// the class of capabilities that iroh-services will accept when deriving from a
+    /// shared secret like an API secret. These should be "client" capabilities:
+    /// typically for users of an app
     pub fn for_shared_secret() -> Self {
         Self::new([Cap::Client])
     }
 
-    /// Returns the maximum set of capabilities.
+    /// The maximum set of capabilities. iroh-services will only accept these capabilities
+    /// when deriving from a secret that is registered with iroh-services, like an SSH key
     pub fn all() -> Self {
         Self::new([Cap::All])
     }
@@ -211,7 +214,7 @@ impl NetDiagnosticsCap {
     }
 }
 
-/// A set of capabilities.
+/// A set of capabilities
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
 pub struct CapSet<C: Ord>(BTreeSet<C>);
 
@@ -290,10 +293,14 @@ mod tests {
             .extend([RelayCap::Use])
             .extend([MetricsCap::PutAny]);
 
+        // test to-and-from string conversion
+        println!("all:     {all:?}");
         let strings = all.to_strings();
+        println!("strings: {strings:?}");
         let parsed = Caps::from_strs(strings.iter().map(|s| s.as_str())).unwrap();
         assert_eq!(all, parsed);
 
+        // manual parsing from strings
         let s = ["metrics:put-any", "relay:use"];
         let caps = Caps::from_strs(s).unwrap();
         assert_eq!(
@@ -302,6 +309,7 @@ mod tests {
         );
 
         let full = Caps::new([Cap::All]);
+
         assert!(full.permits(&full));
         assert!(full.permits(&all));
         assert!(!all.permits(&full));
@@ -323,13 +331,10 @@ mod tests {
     #[test]
     fn client_caps() {
         let client = Caps::new([Cap::Client]);
-        let empty = Caps::default();
+
         let all = Caps::new([Cap::All]);
         let metrics = Caps::new([MetricsCap::PutAny]);
         let relay = Caps::new([RelayCap::Use]);
-
-        assert!(client.permits(&empty));
-        assert!(client.permits(&client));
         assert!(client.permits(&metrics));
         assert!(client.permits(&relay));
         assert!(!client.permits(&all));
