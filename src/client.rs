@@ -331,12 +331,22 @@ impl From<irpc::Error> for BuildError {
     }
 }
 
+/// How long [`Client::shutdown`] lets a request already in flight finish.
+///
+/// Dropping a request mid-flight resets its stream, and the server treats that
+/// as the connection failing: it stops reading requests and tears the
+/// connection down. Letting the request finish keeps the connection usable for
+/// the final metrics push. Requests to a responsive server complete in
+/// fast, so this only runs out when the server has stopped answering,
+/// in which case the final metrics push is then skipped.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+
 /// How long [`Client::shutdown`] waits for the final metrics push.
 ///
 /// The push goes over an established connection, so it is normally well under
 /// this. The bound covers a peer that has gone silent without closing, where
 /// the request would otherwise hang until the connection times out.
-const SHUTDOWN_FLUSH_TIMEOUT: Duration = Duration::from_secs(3);
+const SHUTDOWN_FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Minimum length in bytes for an endpoint name.
 pub const CLIENT_NAME_MIN_LENGTH: usize = 2;
@@ -526,18 +536,15 @@ impl Client {
             .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
     }
 
-    /// Shuts down the client, pushing one final round of metrics first.
+    /// Shuts down the client, after pushing one final round of metrics.
     ///
-    /// Returns once the background actor has stopped, so requests on any clone
-    /// of this client will fail afterwards. Dropping the client without calling
-    /// this aborts the actor immediately, losing any metrics accumulated since
-    /// the last interval push.
+    /// Calling this aborts any inflight requests, and all subsequent requests
+    /// triggered via methods on [`Self`] will fail. If the client is currently
+    /// connected, it will send one final metrics update before shutting down
+    /// the client actor.
     ///
-    /// Any request in flight is cancelled rather than awaited, so a client that
-    /// cannot reach the server shuts down promptly instead of inheriting that
-    /// request's timeout. The final push is best effort: it happens only when
-    /// the metrics interval is enabled and a connection is already established,
-    /// gets a few seconds to complete, and errors are logged and ignored.
+    /// Dropping the client without calling this method immediately stops the
+    /// actor without a final metrics push.
     pub async fn shutdown(&self) {
         self.shutdown.cancel();
         // The actor drops the inbox receiver on its way out.
@@ -717,9 +724,9 @@ impl ClientActor {
     /// Runs the actor until the inbox closes or `shutdown` is cancelled, then
     /// pushes one final round of metrics.
     ///
-    /// Cancellation drops whatever [`Self::run_inner`] is awaiting, so a
-    /// request in flight, most importantly a dial to a server that never
-    /// answers, does not hold up the shutdown.
+    /// Cancelling `shutdown` drops whatever [`Self::run_inner`] is awaiting,
+    /// including all in-flight or queued requests. We do this so that a
+    /// pending dial does not hold up shutdown.
     async fn run(
         mut self,
         interval: Option<Duration>,
@@ -727,16 +734,23 @@ impl ClientActor {
         shutdown: CancellationToken,
     ) {
         let metrics_enabled = interval.is_some();
-        tokio::select! {
-            biased;
-            () = shutdown.cancelled() => trace!("client actor cancelled"),
-            () = self.run_inner(interval, &mut inbox) => {},
-        }
+        let shutdown_and_grace_period_expired = async {
+            shutdown.cancelled().await;
+            n0_future::time::sleep(SHUTDOWN_GRACE).await;
+        };
+
+        let clean_shutdown = tokio::select! {
+            () = self.run_inner(interval, &mut inbox, &shutdown) => true,
+            () = shutdown_and_grace_period_expired => {
+                debug!("shutdown grace elapsed, dropping the request in flight");
+                false
+            }
+        };
 
         // Flush only over a connection that already exists. Dialing here would
         // reintroduce the stall that cancelling just avoided, and an endpoint
         // that never connected has nothing the server could attribute.
-        if metrics_enabled && self.is_connected() {
+        if clean_shutdown && metrics_enabled && self.is_connected() {
             match n0_future::time::timeout(SHUTDOWN_FLUSH_TIMEOUT, self.send_metrics()).await {
                 Ok(Ok(())) => trace!("pushed final metrics on shutdown"),
                 Ok(Err(err)) => debug!(%err, "failed to push final metrics on shutdown"),
@@ -750,6 +764,7 @@ impl ClientActor {
         &mut self,
         interval: Option<Duration>,
         inbox: &mut tokio::sync::mpsc::Receiver<ClientActorMessage>,
+        shutdown: &CancellationToken,
     ) {
         let mut metrics_timer = interval.map(|interval| n0_future::time::interval(interval));
         trace!("starting client actor");
@@ -778,6 +793,12 @@ impl ClientActor {
             trace!("client actor tick");
             tokio::select! {
                 biased;
+                // Only reached between requests: while an arm below is awaiting,
+                // this select is not polled, so the request finishes first.
+                () = shutdown.cancelled() => {
+                    trace!("client actor observed shutdown between requests");
+                    break;
+                }
                 Some(msg) = inbox.recv() => {
                     match msg {
                         ClientActorMessage::Ping { done } => {
@@ -934,14 +955,15 @@ impl ClientActor {
         trace!(request = %msg, "client actor send request");
         let client = self.connect().await?;
         let res = client.rpc(msg).await;
+
         if let Err(err) = &res
             && is_connection_lost(err)
         {
-            // The connection is gone or in an unknown state; the next request
-            // dials and authenticates afresh. Server-side errors arrive as
-            // `Ok(Err(RemoteError))` and keep the connection.
+            // The connection is gone or in an unknown state. Clear the client
+            // so that the next request dials and authenticates.
             self.client = None;
         }
+
         res.inspect_err(|err| warn!("rpc error: {err}"))
             .map_err(Error::from)
     }
@@ -1112,7 +1134,7 @@ mod tests {
             CLIENT_ATTRIBUTES_MAX_COUNT, CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError,
             ValidateNameError, is_connection_lost,
         },
-        protocol::{ALPN, IrohServicesProtocol, ServicesMessage},
+        protocol::{ALPN, IrohServicesProtocol, Pong, ServicesMessage},
     };
 
     /// What the test server recorded about one PutMetrics request.
@@ -1392,6 +1414,130 @@ mod tests {
             meta: Default::default(),
         };
         assert!(is_connection_lost(&closed));
+    }
+
+    /// Mirrors the backend's request loop: reads are sequential and any error
+    /// ends the loop and the connection with it.
+    #[derive(Debug)]
+    struct SlowServer {
+        /// Set once the server has answered a Ping without the stream failing.
+        ping_answered: Arc<AtomicBool>,
+        /// Counts metrics pushes the server actually read.
+        metrics_seen: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl ProtocolHandler for SlowServer {
+        async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+            self.handle(connection).await.map_err(|e| {
+                let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
+                AcceptError::from(AnyError::from(boxed))
+            })
+        }
+    }
+
+    impl SlowServer {
+        async fn handle(&self, connection: Connection) -> anyhow::Result<()> {
+            let Some(first) = read_request::<IrohServicesProtocol>(&connection).await? else {
+                return Ok(());
+            };
+            let ServicesMessage::Auth(WithChannels { tx, .. }) = first else {
+                anyhow::bail!("expected auth first");
+            };
+            tx.send(()).await?;
+
+            loop {
+                let Ok(Some(request)) = read_request::<IrohServicesProtocol>(&connection).await
+                else {
+                    return Ok(());
+                };
+                match request {
+                    ServicesMessage::Ping(WithChannels { inner, tx, .. }) => {
+                        // long enough for shutdown to land while this is in flight
+                        n0_future::time::sleep(Duration::from_millis(300)).await;
+                        // a client that dropped the request resets the stream,
+                        // and this send is where the server finds out
+                        tx.send(Pong {
+                            req_id: inner.req_id,
+                        })
+                        .await?;
+                        self.ping_answered.store(true, Ordering::SeqCst);
+                    }
+                    ServicesMessage::PutMetrics(WithChannels { tx, .. }) => {
+                        self.metrics_seen.fetch_add(1, Ordering::SeqCst);
+                        tx.send(Ok(())).await?;
+                    }
+                    _ => anyhow::bail!("unexpected request"),
+                }
+            }
+        }
+    }
+
+    /// Assert that shutting down with a request in flight lets that request
+    /// finish, so the final metrics push still reaches the server.
+    ///
+    /// Dropping the request instead would reset its stream, and the server
+    /// treats that as the connection failing: it stops reading, so the push
+    /// that shutdown exists for is never seen.
+    #[tokio::test]
+    async fn test_shutdown_drains_request_in_flight() {
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(9);
+        let server_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+        let client_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+
+        let ping_answered = Arc::new(AtomicBool::new(false));
+        let metrics_seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let router = Router::builder(server_ep.clone())
+            .accept(
+                ALPN,
+                SlowServer {
+                    ping_answered: ping_answered.clone(),
+                    metrics_seen: metrics_seen.clone(),
+                },
+            )
+            .spawn();
+
+        let shared_secret = SecretKey::from_bytes(&rng.random());
+        let cap = create_api_token_from_secret_key(
+            shared_secret,
+            client_ep.id(),
+            Duration::from_secs(3600),
+            Caps::for_shared_secret(),
+        )
+        .unwrap();
+
+        let client = Client::builder(&client_ep)
+            .rcan(cap)
+            .unwrap()
+            .remote(server_ep.addr())
+            // long enough that only the startup tick fires on its own
+            .metrics_interval(Duration::from_secs(3600))
+            .build()
+            .await
+            .unwrap();
+
+        // let the startup metrics push establish the connection
+        n0_future::time::sleep(Duration::from_millis(500)).await;
+        let after_startup = metrics_seen.load(Ordering::SeqCst);
+        assert_eq!(after_startup, 1, "expected the startup metrics push");
+
+        // put a ping in flight, then shut down while the server sits on it
+        let pinging = client.clone();
+        let ping = n0_future::task::spawn(async move { pinging.ping().await });
+        n0_future::time::sleep(Duration::from_millis(100)).await;
+        client.shutdown().await;
+
+        assert!(
+            ping_answered.load(Ordering::SeqCst),
+            "the ping in flight was dropped, so the server saw its stream fail"
+        );
+        assert_eq!(
+            metrics_seen.load(Ordering::SeqCst),
+            after_startup + 1,
+            "the final metrics push did not reach the server"
+        );
+
+        let _ = ping.await;
+        router.shutdown().await.unwrap();
     }
 
     /// Assert that shutdown does not wait for a request in flight.
