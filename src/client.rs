@@ -14,7 +14,10 @@ use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
 use irpc::{Channels, RpcMessage, WithChannels, channel::none::NoReceiver};
 use irpc_iroh::IrohRemoteConnection;
 use n0_error::StackResultExt;
-use n0_future::{task::AbortOnDropHandle, time::Duration};
+use n0_future::{
+    task::{self, AbortOnDropHandle},
+    time::{self, Duration},
+};
 use rcan::Rcan;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -267,7 +270,7 @@ impl ClientBuilder {
         let registry = Arc::new(RwLock::new(self.registry));
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         let shutdown = CancellationToken::new();
-        let actor_task = AbortOnDropHandle::new(n0_future::task::spawn(
+        let actor_task = AbortOnDropHandle::new(task::spawn(
             ClientActor {
                 capabilities,
                 endpoint: self.endpoint.clone(),
@@ -736,7 +739,7 @@ impl ClientActor {
         let metrics_enabled = interval.is_some();
         let shutdown_and_grace_period_expired = async {
             shutdown.cancelled().await;
-            n0_future::time::sleep(SHUTDOWN_GRACE).await;
+            time::sleep(SHUTDOWN_GRACE).await;
         };
 
         let clean_shutdown = tokio::select! {
@@ -751,7 +754,7 @@ impl ClientActor {
         // reintroduce the stall that cancelling just avoided, and an endpoint
         // that never connected has nothing the server could attribute.
         if clean_shutdown && metrics_enabled && self.is_connected() {
-            match n0_future::time::timeout(SHUTDOWN_FLUSH_TIMEOUT, self.send_metrics()).await {
+            match time::timeout(SHUTDOWN_FLUSH_TIMEOUT, self.send_metrics()).await {
                 Ok(Ok(())) => trace!("pushed final metrics on shutdown"),
                 Ok(Err(err)) => debug!(%err, "failed to push final metrics on shutdown"),
                 Err(_) => debug!("final metrics push on shutdown timed out"),
@@ -766,7 +769,7 @@ impl ClientActor {
         inbox: &mut tokio::sync::mpsc::Receiver<ClientActorMessage>,
         shutdown: &CancellationToken,
     ) {
-        let mut metrics_timer = interval.map(|interval| n0_future::time::interval(interval));
+        let mut metrics_timer = interval.map(|interval| time::interval(interval));
         trace!("starting client actor");
 
         // Send the initial metadata (set via the builder) once the actor starts.
@@ -793,8 +796,8 @@ impl ClientActor {
             trace!("client actor tick");
             tokio::select! {
                 biased;
-                // Only reached between requests: while an arm below is awaiting,
-                // this select is not polled, so the request finishes first.
+                // Shutdown is only observed between requests: a branch body below
+                // runs to completion, so a request already in flight finishes first.
                 () = shutdown.cancelled() => {
                     trace!("client actor observed shutdown between requests");
                     break;
@@ -1121,7 +1124,10 @@ mod tests {
     use irpc::WithChannels;
     use irpc_iroh::read_request;
     use n0_error::AnyError;
-    use n0_future::time::Duration;
+    use n0_future::{
+        task,
+        time::{self, Duration},
+    };
     use rand::{RngExt, SeedableRng};
     use temp_env_vars::temp_env_vars;
 
@@ -1211,7 +1217,7 @@ mod tests {
                         anyhow::bail!("client re-sent auth on a live connection");
                     }
                     ServicesMessage::Ping(WithChannels { inner, tx, .. }) => {
-                        n0_future::time::sleep(self.ping_delay).await;
+                        time::sleep(self.ping_delay).await;
                         // A client that dropped this request has reset the
                         // stream, and this send is where the server finds out.
                         tx.send(Pong {
@@ -1501,8 +1507,8 @@ mod tests {
 
         // put a ping in flight, then shut down while the server sits on it
         let pinging = client.clone();
-        let ping = n0_future::task::spawn(async move { pinging.ping().await });
-        n0_future::time::sleep(Duration::from_millis(100)).await;
+        let ping = task::spawn(async move { pinging.ping().await });
+        time::sleep(Duration::from_millis(100)).await;
         client.shutdown().await;
 
         let recorded = recorded_so_far(&mut seen_rx);
@@ -1550,9 +1556,9 @@ mod tests {
             .unwrap();
 
         // let the startup metrics tick get as far as the dial
-        n0_future::time::sleep(Duration::from_millis(200)).await;
+        time::sleep(Duration::from_millis(200)).await;
 
-        n0_future::time::timeout(Duration::from_secs(5), client.shutdown())
+        time::timeout(Duration::from_secs(5), client.shutdown())
             .await
             .expect("shutdown blocked on the dial in flight");
     }
