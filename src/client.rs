@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{Result, ensure};
 use iroh::{
     Endpoint, EndpointAddr, EndpointId,
     endpoint::{ConnectError, Connection},
@@ -29,8 +29,8 @@ use crate::{
     caps::{Caps, DEFAULT_CAP_EXPIRY},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
     protocol::{
-        ALPN, Auth, IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong, PutMetrics,
-        PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
+        ALPN, Auth, GrantCap, IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong,
+        PutMetrics, PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
     },
 };
 
@@ -60,7 +60,6 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Client {
     // owned clone of the endpoint for diagnostics, and for connection restarts on actor close
-    #[allow(dead_code)]
     endpoint: Endpoint,
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
     /// Cancelled by [`Client::shutdown`] to stop whatever the actor is doing.
@@ -71,7 +70,6 @@ pub struct Client {
 /// ClientBuilder provides configures and builds a iroh-services client, typically
 /// created with [`Client::builder`]
 pub struct ClientBuilder {
-    #[allow(dead_code)]
     cap_expiry: Duration,
     cap: Option<Rcan<Caps>>,
     endpoint: Endpoint,
@@ -423,6 +421,20 @@ pub enum Error {
     Rpc(#[from] irpc::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+    #[error("Local client actor is stopped, cannot send requests")]
+    ActorStopped,
+}
+
+impl From<tokio::sync::mpsc::error::SendError<ClientActorMessage>> for Error {
+    fn from(_value: tokio::sync::mpsc::error::SendError<ClientActorMessage>) -> Self {
+        Error::ActorStopped
+    }
+}
+
+impl From<tokio::sync::oneshot::error::RecvError> for Error {
+    fn from(_value: tokio::sync::oneshot::error::RecvError) -> Self {
+        Error::ActorStopped
+    }
 }
 
 impl Client {
@@ -435,11 +447,8 @@ impl Client {
         let (tx, rx) = oneshot::channel();
         self.message_channel
             .send(ClientActorMessage::ReadName { done: tx })
-            .await
-            .map_err(|_| Error::Other(anyhow!("sending name read request")))?;
-
-        rx.await
-            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))
+            .await?;
+        rx.await.map_err(Into::into)
     }
 
     /// Read the current endpoint group from the local client.
@@ -447,11 +456,8 @@ impl Client {
         let (tx, rx) = oneshot::channel();
         self.message_channel
             .send(ClientActorMessage::ReadGroup { done: tx })
-            .await
-            .map_err(|_| Error::Other(anyhow!("sending group read request")))?;
-
-        rx.await
-            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))
+            .await?;
+        rx.await.map_err(Into::into)
     }
 
     /// Name the active endpoint cloud-side.
@@ -459,14 +465,28 @@ impl Client {
     /// names can be any UTF-8 string, with a min length of 2 bytes, and
     /// maximum length of 128 bytes. **name uniqueness is not enforced.**
     pub async fn set_name(&self, name: impl Into<String>) -> Result<(), Error> {
-        set_name_inner(self.message_channel.clone(), name.into()).await
+        let name = name.into();
+        validate_name(&name)?;
+        debug!(name_len = name.len(), "calling set name");
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::NameEndpoint { name, done: tx })
+            .await?;
+        rx.await?
     }
 
     /// Attach the active endpoint to a single named group cloud-side.
     ///
     /// A group name must be 2 to 128 bytes of UTF-8.
     pub async fn set_group(&self, group: impl Into<String>) -> Result<(), Error> {
-        set_group_inner(self.message_channel.clone(), group.into()).await
+        let group: String = group.into();
+        validate_name(&group).map_err(Error::InvalidGroup)?;
+        debug!(%group, "calling set group");
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::SetGroup { group, done: tx })
+            .await?;
+        rx.await?
     }
 
     /// Replace the arbitrary key-value attributes on the active endpoint cloud-side.
@@ -496,7 +516,16 @@ impl Client {
             .into_iter()
             .map(|(k, v)| (k.into(), v.into()))
             .collect();
-        set_attributes_inner(self.message_channel.clone(), collected).await
+        validate_attributes(&collected)?;
+        debug!(attr_count = collected.len(), "calling set attributes");
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::SetAttributes {
+                attributes: collected,
+                done: tx,
+            })
+            .await?;
+        rx.await?
     }
 
     /// Set or replace a single attribute, merging it into the endpoint's existing
@@ -510,7 +539,19 @@ impl Client {
         key: impl Into<String>,
         value: impl Into<String>,
     ) -> Result<(), Error> {
-        set_attribute_inner(self.message_channel.clone(), key.into(), value.into()).await
+        // Validation happens in the actor against the merged set (current
+        // attributes plus this entry), since only there is the current set
+        // known. Merging can exceed the entry-count limit even when this
+        // single entry is valid.
+        let (tx, rx) = oneshot::channel();
+        self.message_channel
+            .send(ClientActorMessage::SetAttribute {
+                key: key.into(),
+                value: value.into(),
+                done: tx,
+            })
+            .await?;
+        rx.await?
     }
 
     /// Pings the remote node.
@@ -518,11 +559,8 @@ impl Client {
         let (tx, rx) = oneshot::channel();
         self.message_channel
             .send(ClientActorMessage::Ping { done: tx })
-            .await
-            .map_err(|_| Error::Other(anyhow!("sending ping request")))?;
-
-        rx.await
-            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+            .await?;
+        rx.await?
     }
 
     /// immediately send a single dump of metrics to iroh-services. It's not necessary
@@ -532,11 +570,8 @@ impl Client {
         let (tx, rx) = oneshot::channel();
         self.message_channel
             .send(ClientActorMessage::SendMetrics { done: tx })
-            .await
-            .map_err(|_| Error::Other(anyhow!("sending metrics")))?;
-
-        rx.await
-            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+            .await?;
+        rx.await?
     }
 
     /// Shuts down the client, after pushing one final round of metrics.
@@ -576,11 +611,8 @@ impl Client {
                 cap: Box::new(cap),
                 done: tx,
             })
-            .await
-            .map_err(|_| Error::Other(anyhow!("granting capability")))?;
-
-        rx.await
-            .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
+            .await?;
+        rx.await?
     }
 
     /// run local network status diagnostics, optionally uploading the results
@@ -593,12 +625,8 @@ impl Client {
                     done: tx,
                     report: Box::new(report.clone()),
                 })
-                .await
-                .map_err(|_| Error::Other(anyhow!("sending network diagnostics report")))?;
-
-            let _ = rx
-                .await
-                .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?;
+                .await?;
+            rx.await??;
         }
 
         Ok(report)
@@ -612,8 +640,6 @@ enum ClientActorMessage {
     Ping {
         done: oneshot::Sender<Result<Pong, Error>>,
     },
-    // GrantCap is used by the `client_host` feature flag
-    #[allow(dead_code)]
     GrantCap {
         // boxed to avoid large enum variants
         cap: Box<Rcan<Caps>>,
@@ -806,50 +832,34 @@ impl ClientActor {
                     match msg {
                         ClientActorMessage::Ping { done } => {
                             let res = self.send_ping().await;
-                            if let Err(err) = done.send(res) {
-                                debug!("failed to send ping: {:#?}", err);
-                            }
+                            done.send(res).ok();
                         },
                         ClientActorMessage::SendMetrics { done } => {
                             trace!("sending metrics manually triggered");
                             let res = self.send_metrics().await;
-                            if let Err(err) = done.send(res) {
-                                debug!("failed to push metrics: {:#?}", err);
-                            }
+                            done.send(res).ok();
                         }
                         ClientActorMessage::GrantCap { cap, done } => {
                             let res = self.grant_cap(*cap).await;
-                            if let Err(err) = done.send(res) {
-                                warn!("failed to grant capability: {:#?}", err);
-                            }
+                            done.send(res).ok();
                         }
                         ClientActorMessage::ReadName { done } => {
-                            if let Err(err) = done.send(self.name.clone()) {
-                                warn!("sending name value: {:#?}", err);
-                            }
+                            done.send(self.name.clone()).ok();
                         }
                         ClientActorMessage::ReadGroup { done } => {
-                            if let Err(err) = done.send(self.group.clone()) {
-                                warn!("sending group value: {:#?}", err);
-                            }
+                            done.send(self.group.clone()).ok();
                         }
                         ClientActorMessage::NameEndpoint { name, done } => {
                             let res = self.send_name_endpoint(name).await;
-                            if let Err(err) = done.send(res) {
-                                warn!("failed to name endpoint: {:#?}", err);
-                            }
+                            done.send(res).ok();
                         }
                         ClientActorMessage::SetGroup { group, done } => {
                             let res = self.send_set_group(group).await;
-                            if let Err(err) = done.send(res) {
-                                warn!("failed to set group: {:#?}", err);
-                            }
+                            done.send(res).ok();
                         }
                         ClientActorMessage::SetAttributes { attributes, done } => {
                             let res = self.send_set_attributes(attributes).await;
-                            if let Err(err) = done.send(res) {
-                                warn!("failed to set attributes: {:#?}", err);
-                            }
+                            done.send(res).ok();
                         }
                         ClientActorMessage::SetAttribute { key, value, done } => {
                             // Merge into the current set and validate the union:
@@ -859,20 +869,14 @@ impl ClientActor {
                             let mut merged = self.attributes.clone();
                             merged.insert(key, value);
                             let res = match validate_attributes(&merged) {
-                                Ok(()) => {
-                                    self.send_set_attributes(merged).await
-                                }
+                                Ok(()) => self.send_set_attributes(merged).await,
                                 Err(err) => Err(Error::from(err)),
                             };
-                            if let Err(err) = done.send(res) {
-                                warn!("failed to set attribute: {:#?}", err);
-                            }
+                            done.send(res).ok();
                         }
                         ClientActorMessage::PutNetworkDiagnostics { report, done } => {
                             let res = self.put_network_diagnostics(*report).await;
-                            if let Err(err) = done.send(res) {
-                                warn!("failed to publish network diagnostics: {:#?}", err);
-                            }
+                            done.send(res).ok();
                         }
                     }
                 }
@@ -1019,87 +1023,14 @@ impl ClientActor {
     }
 
     async fn grant_cap(&mut self, cap: Rcan<Caps>) -> Result<(), Error> {
-        self.rpc(crate::protocol::GrantCap { cap }).await??;
+        self.rpc(GrantCap { cap }).await??;
         Ok(())
     }
 
-    async fn put_network_diagnostics(
-        &mut self,
-        report: crate::net_diagnostics::DiagnosticsReport,
-    ) -> Result<(), Error> {
-        let req = PutNetworkDiagnostics { report };
-        self.rpc(req).await??;
+    async fn put_network_diagnostics(&mut self, report: DiagnosticsReport) -> Result<(), Error> {
+        self.rpc(PutNetworkDiagnostics { report }).await??;
         Ok(())
     }
-}
-
-async fn set_name_inner(
-    message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
-    name: String,
-) -> Result<(), Error> {
-    validate_name(&name)?;
-    debug!(name_len = name.len(), "calling set name");
-    let (tx, rx) = oneshot::channel();
-    message_channel
-        .send(ClientActorMessage::NameEndpoint { name, done: tx })
-        .await
-        .map_err(|_| Error::Other(anyhow!("sending name endpoint request")))?;
-    rx.await
-        .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
-}
-
-async fn set_group_inner(
-    message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
-    group: String,
-) -> Result<(), Error> {
-    validate_name(&group).map_err(Error::InvalidGroup)?;
-    debug!(%group, "calling set group");
-    let (tx, rx) = oneshot::channel();
-    message_channel
-        .send(ClientActorMessage::SetGroup { group, done: tx })
-        .await
-        .map_err(|_| Error::Other(anyhow!("sending set group request")))?;
-    rx.await
-        .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
-}
-
-async fn set_attributes_inner(
-    message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
-    attributes: BTreeMap<String, String>,
-) -> Result<(), Error> {
-    validate_attributes(&attributes)?;
-    debug!(attr_count = attributes.len(), "calling set attributes");
-    let (tx, rx) = oneshot::channel();
-    message_channel
-        .send(ClientActorMessage::SetAttributes {
-            attributes,
-            done: tx,
-        })
-        .await
-        .map_err(|_| Error::Other(anyhow!("sending set attributes request")))?;
-    rx.await
-        .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
-}
-
-async fn set_attribute_inner(
-    message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
-    key: String,
-    value: String,
-) -> Result<(), Error> {
-    // Validation happens in the actor against the merged set (current attributes
-    // plus this entry), since only there is the current set known. Merging can
-    // exceed the entry-count limit even when this single entry is valid.
-    let (tx, rx) = oneshot::channel();
-    message_channel
-        .send(ClientActorMessage::SetAttribute {
-            key,
-            value,
-            done: tx,
-        })
-        .await
-        .map_err(|_| Error::Other(anyhow!("sending set attribute request")))?;
-    rx.await
-        .map_err(|e| Error::Other(anyhow!("response on internal channel: {:?}", e)))?
 }
 
 #[cfg(test)]
