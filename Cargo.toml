@@ -27,6 +27,7 @@ serde = { version = "1.0.217", features = ["derive"] }
 strum = { version = "0.28", features = ["derive"] }
 thiserror = "2.0.12"
 tokio = { version = "1", default-features = false, features = ["sync"] }
+tokio-util = { version = "0.7", default-features = false }
 tracing = "0.1.41"
 uuid = { version = "1.17", features = ["v4", "serde", "v7", "js"] }
 tracing-subscriber = { version = "0.3.20", features = [
