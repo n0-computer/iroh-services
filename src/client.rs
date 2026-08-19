@@ -875,18 +875,25 @@ impl ClientActor {
             debug!(%reason, "connection closed by remote, reconnecting");
             self.client = None;
         }
-        if self.client.is_none() {
-            let client = RpcClient::connect(
-                &self.endpoint,
-                self.remote.clone(),
-                self.capabilities.clone(),
-            )
-            .await?;
-            // Recreate the metrics encoder to force sending the schema on the next metrics push.
-            self.encoder = Encoder::new(self.registry.clone());
-            self.client = Some(client);
-        }
-        Ok(&self.client.as_ref().expect("just checked").irpc)
+        // Taking the connection out and putting it back lets `insert` hand out
+        // a borrow tied to the value it just stored. Checking `is_none` and
+        // then looking the value up again needs an `expect`, because the
+        // compiler cannot see that the lookup follows the store.
+        let client = match self.client.take() {
+            Some(client) => client,
+            None => {
+                let client = RpcClient::connect(
+                    &self.endpoint,
+                    self.remote.clone(),
+                    self.capabilities.clone(),
+                )
+                .await?;
+                // Recreate the metrics encoder to force sending the schema on the next metrics push.
+                self.encoder = Encoder::new(self.registry.clone());
+                client
+            }
+        };
+        Ok(&self.client.insert(client).irpc)
     }
 
     async fn rpc<Req, Res>(&mut self, msg: Req) -> Result<Res, Error>
