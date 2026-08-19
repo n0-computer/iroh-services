@@ -1,398 +1,55 @@
-use std::{collections::BTreeSet, fmt, str::FromStr};
-
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 use iroh::{EndpointId, SecretKey};
+pub use iroh_services_proto::caps::{Cap, CapSet, Caps, MetricsCap, NetDiagnosticsCap, RelayCap};
 use n0_future::time::Duration;
-use rcan::{Capability, Expires, Rcan};
-use serde::{Deserialize, Serialize};
+use rcan::{Expires, Rcan};
+
+use crate::CapabilityToken;
 
 pub(crate) const DEFAULT_CAP_EXPIRY: Duration = Duration::from_hours(24 * 30); // 1 month
 
-macro_rules! cap_enum(
-    ($enum:item) => {
-        #[derive(
-            Debug,
-            Eq,
-            PartialEq,
-            Ord,
-            PartialOrd,
-            Serialize,
-            Deserialize,
-            Clone,
-            Copy,
-            strum::Display,
-            strum::EnumString,
-        )]
-        #[strum(serialize_all = "kebab-case")]
-        #[serde(rename_all = "kebab-case")]
-        $enum
-    }
-);
-
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "kebab-case")]
-pub enum Caps {
-    V0(CapSet<Cap>),
-}
-
-impl Default for Caps {
-    fn default() -> Self {
-        Self::V0(CapSet::default())
-    }
-}
-
-impl std::ops::Deref for Caps {
-    type Target = CapSet<Cap>;
-
-    fn deref(&self) -> &Self::Target {
-        let Self::V0(slf) = self;
-        slf
-    }
-}
-
-/// A capability is the capacity to do something. Capabilities are embedded
-/// within signed tokens that dictate who created them, and who they apply to.
-/// Caps follow the [object capability model], where possession of a valid
-/// capability token is the canonical source of authorization. This is different
-/// from an access control list approach where users authenticate, and their
-/// current set of capabilities are stored within a database.
-///
-/// [object capability model]: https://en.wikipedia.org/wiki/Object-capability_model
-#[derive(
-    Debug,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    derive_more::From,
-    strum::Display,
-)]
-#[serde(rename_all = "kebab-case")]
-pub enum Cap {
-    #[strum(to_string = "all")]
-    All,
-    #[strum(to_string = "client")]
-    Client,
-    #[strum(to_string = "relay:{0}")]
-    Relay(RelayCap),
-    #[strum(to_string = "metrics:{0}")]
-    Metrics(MetricsCap),
-    #[strum(to_string = "net-diagnostics:{0}")]
-    NetDiagnostics(NetDiagnosticsCap),
-}
-
-impl FromStr for Cap {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        if s == "all" {
-            Ok(Self::All)
-        } else if let Some((domain, inner)) = s.split_once(":") {
-            Ok(match domain {
-                "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
-                "relay" => Self::Relay(RelayCap::from_str(inner)?),
-                "net-diagnostics" => Self::NetDiagnostics(NetDiagnosticsCap::from_str(inner)?),
-                _ => bail!("invalid cap domain"),
-            })
-        } else {
-            Err(anyhow::anyhow!("invalid cap string"))
-        }
-    }
-}
-
-cap_enum!(
-    pub enum MetricsCap {
-        PutAny,
-    }
-);
-
-cap_enum!(
-    pub enum RelayCap {
-        Use,
-    }
-);
-
-cap_enum!(
-    pub enum NetDiagnosticsCap {
-        PutAny,
-        GetAny,
-    }
-);
-
-impl Caps {
-    pub fn new(caps: impl IntoIterator<Item = impl Into<Cap>>) -> Self {
-        Self::V0(CapSet::new(caps))
-    }
-
-    /// the class of capabilities that iroh-services will accept when deriving from a
-    /// shared secret like an [ApiSecret]. These should be "client" capabilities:
-    /// typically for users of an app
-    ///
-    /// [ApiSecret]: crate::api_secret::ApiSecret
-    pub fn for_shared_secret() -> Self {
-        Self::new([Cap::Client])
-    }
-
-    /// The maximum set of capabilities. iroh-services will only accept these capabilities
-    /// when deriving from a secret that is registered with iroh-services, like an SSH key
-    pub fn all() -> Self {
-        Self::new([Cap::All])
-    }
-
-    pub fn extend(self, caps: impl IntoIterator<Item = impl Into<Cap>>) -> Self {
-        let Self::V0(mut set) = self;
-        set.extend(caps.into_iter().map(Into::into));
-        Self::V0(set)
-    }
-
-    pub fn from_strs<'a>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self> {
-        Ok(Self::V0(CapSet::from_strs(strs)?))
-    }
-
-    pub fn to_strings(&self) -> Vec<String> {
-        let Self::V0(set) = self;
-        set.to_strings()
-    }
-}
-
-impl Capability for Caps {
-    fn permits(&self, other: &Self) -> bool {
-        let Self::V0(slf) = self;
-        let Self::V0(other) = other;
-        slf.permits(other)
-    }
-}
-
-impl From<Cap> for Caps {
-    fn from(cap: Cap) -> Self {
-        Self::new([cap])
-    }
-}
-
-impl Capability for Cap {
-    fn permits(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Cap::All, _) => true,
-            (Cap::Client, other) => client_capabilities(other),
-            (Cap::Relay(slf), Cap::Relay(other)) => slf.permits(other),
-            (Cap::Metrics(slf), Cap::Metrics(other)) => slf.permits(other),
-            (Cap::NetDiagnostics(slf), Cap::NetDiagnostics(other)) => slf.permits(other),
-            (_, _) => false,
-        }
-    }
-}
-
-fn client_capabilities(other: &Cap) -> bool {
-    match other {
-        Cap::All => false,
-        Cap::Client => true,
-        Cap::Relay(RelayCap::Use) => true,
-        Cap::Metrics(MetricsCap::PutAny) => true,
-        Cap::NetDiagnostics(NetDiagnosticsCap::PutAny) => true,
-        Cap::NetDiagnostics(NetDiagnosticsCap::GetAny) => true,
-    }
-}
-
-impl Capability for MetricsCap {
-    fn permits(&self, other: &Self) -> bool {
-        match (self, other) {
-            (MetricsCap::PutAny, MetricsCap::PutAny) => true,
-        }
-    }
-}
-
-impl Capability for RelayCap {
-    fn permits(&self, other: &Self) -> bool {
-        match (self, other) {
-            (RelayCap::Use, RelayCap::Use) => true,
-        }
-    }
-}
-
-impl Capability for NetDiagnosticsCap {
-    fn permits(&self, other: &Self) -> bool {
-        match (self, other) {
-            (NetDiagnosticsCap::PutAny, NetDiagnosticsCap::PutAny) => true,
-            (NetDiagnosticsCap::GetAny, NetDiagnosticsCap::GetAny) => true,
-            (_, _) => false,
-        }
-    }
-}
-
-/// A set of capabilities
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
-pub struct CapSet<C: Capability + Ord>(BTreeSet<C>);
-
-impl<C: Capability + Ord> Default for CapSet<C> {
-    fn default() -> Self {
-        Self(BTreeSet::new())
-    }
-}
-
-impl<C: Capability + Ord> CapSet<C> {
-    pub fn new(set: impl IntoIterator<Item = impl Into<C>>) -> Self {
-        Self(BTreeSet::from_iter(set.into_iter().map(Into::into)))
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &'_ C> + '_ {
-        self.0.iter()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn contains(&self, cap: impl Into<C>) -> bool {
-        let cap = cap.into();
-        self.0.contains(&cap)
-    }
-
-    pub fn extend(&mut self, caps: impl IntoIterator<Item = impl Into<C>>) {
-        self.0.extend(caps.into_iter().map(Into::into));
-    }
-
-    pub fn insert(&mut self, cap: impl Into<C>) -> bool {
-        self.0.insert(cap.into())
-    }
-
-    pub fn from_strs<'a, E>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self>
-    where
-        C: FromStr<Err = E>,
-        Result<C, E>: anyhow::Context<C, E>,
-    {
-        let mut caps = Self::default();
-        for s in strs {
-            let cap = C::from_str(s).with_context(|| format!("Unknown capability: {s}"))?;
-            caps.insert(cap);
-        }
-        Ok(caps)
-    }
-
-    pub fn to_strings(&self) -> Vec<String>
-    where
-        C: fmt::Display,
-    {
-        self.iter().map(ToString::to_string).collect()
-    }
-}
-
-impl<C: Capability + Ord> Capability for CapSet<C> {
-    fn permits(&self, other: &Self) -> bool {
-        other
-            .iter()
-            .all(|other_cap| self.iter().any(|self_cap| self_cap.permits(other_cap)))
-    }
-}
-
-/// Create an rcan token for the api access from a PEM-encoded OpenSSH ed25519
-/// private key.
+/// Create a capability token for API access from a PEM-encoded OpenSSH ed25519 private key.
 #[cfg(not(wasm_browser))]
 pub fn create_api_token_from_openssh_pem(
     pem: &str,
     local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<Rcan<Caps>> {
+) -> Result<CapabilityToken> {
     let seed = crate::openssh::parse_ed25519_private_key(pem)?;
     let issuer = ed25519_dalek::SigningKey::from_bytes(&seed);
     let audience = local_id.as_verifying_key();
-    let can =
+    let token =
         Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
-    Ok(can)
+    Ok(CapabilityToken::new(token))
 }
 
-/// Create an rcan token that grants capabilities to a remote endpoint.
-/// The local endpoint is the issuer (granter), and the remote endpoint is the
-/// audience (grantee).
+/// Create a capability token that grants capabilities to a remote endpoint.
+///
+/// The local endpoint is the issuer and the remote endpoint is the audience.
 pub fn create_grant_token(
     local_secret: SecretKey,
     remote_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<Rcan<Caps>> {
+) -> Result<CapabilityToken> {
     let issuer = ed25519_dalek::SigningKey::from_bytes(&local_secret.to_bytes());
     let audience = remote_id.as_verifying_key();
-    let can =
+    let token =
         Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
-    Ok(can)
+    Ok(CapabilityToken::new(token))
 }
 
-/// Create an rcan token for the api access from an iroh secret key
+/// Create a capability token for API access from an iroh secret key.
 pub fn create_api_token_from_secret_key(
     private_key: SecretKey,
     local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<Rcan<Caps>> {
+) -> Result<CapabilityToken> {
     let issuer = ed25519_dalek::SigningKey::from_bytes(&private_key.to_bytes());
     let audience = local_id.as_verifying_key();
-    let can =
+    let token =
         Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
-    Ok(can)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn smoke() {
-        let all = Caps::default()
-            .extend([RelayCap::Use])
-            .extend([MetricsCap::PutAny]);
-
-        // test to-and-from string conversion
-        println!("all:     {all:?}");
-        let strings = all.to_strings();
-        println!("strings: {strings:?}");
-        let parsed = Caps::from_strs(strings.iter().map(|s| s.as_str())).unwrap();
-        assert_eq!(all, parsed);
-
-        // manual parsing from strings
-        let s = ["metrics:put-any", "relay:use"];
-        let caps = Caps::from_strs(s).unwrap();
-        assert_eq!(
-            caps,
-            Caps::new([MetricsCap::PutAny]).extend([RelayCap::Use])
-        );
-
-        let full = Caps::new([Cap::All]);
-
-        assert!(full.permits(&full));
-        assert!(full.permits(&all));
-        assert!(!all.permits(&full));
-
-        let metrics = Caps::new([MetricsCap::PutAny]);
-        let relay = Caps::new([RelayCap::Use]);
-
-        for cap in [&metrics, &relay] {
-            assert!(full.permits(cap));
-            assert!(all.permits(cap));
-            assert!(!cap.permits(&full));
-            assert!(!cap.permits(&all));
-        }
-
-        assert!(!metrics.permits(&relay));
-        assert!(!relay.permits(&metrics));
-    }
-
-    #[test]
-    fn client_caps() {
-        let client = Caps::new([Cap::Client]);
-
-        let all = Caps::new([Cap::All]);
-        let metrics = Caps::new([MetricsCap::PutAny]);
-        let relay = Caps::new([RelayCap::Use]);
-        assert!(client.permits(&metrics));
-        assert!(client.permits(&relay));
-        assert!(!client.permits(&all));
-    }
+    Ok(CapabilityToken::new(token))
 }

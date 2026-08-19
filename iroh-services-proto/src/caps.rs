@@ -1,0 +1,337 @@
+use std::{collections::BTreeSet, fmt, str::FromStr};
+
+use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
+
+macro_rules! cap_enum(
+    ($enum:item) => {
+        #[derive(
+            Debug,
+            Eq,
+            PartialEq,
+            Ord,
+            PartialOrd,
+            Serialize,
+            Deserialize,
+            Clone,
+            Copy,
+            strum::Display,
+            strum::EnumString,
+        )]
+        #[strum(serialize_all = "kebab-case")]
+        #[serde(rename_all = "kebab-case")]
+        $enum
+    }
+);
+
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "kebab-case")]
+pub enum Caps {
+    V0(CapSet<Cap>),
+}
+
+impl Default for Caps {
+    fn default() -> Self {
+        Self::V0(CapSet::default())
+    }
+}
+
+impl std::ops::Deref for Caps {
+    type Target = CapSet<Cap>;
+
+    fn deref(&self) -> &Self::Target {
+        let Self::V0(slf) = self;
+        slf
+    }
+}
+
+/// A capability is the capacity to do something. Capabilities are embedded
+/// within signed tokens that dictate who created them, and who they apply to.
+/// Caps follow the [object capability model], where possession of a valid
+/// capability token is the canonical source of authorization. This is different
+/// from an access control list approach where users authenticate, and their
+/// current set of capabilities are stored within a database.
+///
+/// [object capability model]: https://en.wikipedia.org/wiki/Object-capability_model
+#[derive(
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    derive_more::From,
+    strum::Display,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum Cap {
+    #[strum(to_string = "all")]
+    All,
+    #[strum(to_string = "client")]
+    Client,
+    #[strum(to_string = "relay:{0}")]
+    Relay(RelayCap),
+    #[strum(to_string = "metrics:{0}")]
+    Metrics(MetricsCap),
+    #[strum(to_string = "net-diagnostics:{0}")]
+    NetDiagnostics(NetDiagnosticsCap),
+}
+
+impl FromStr for Cap {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if s == "all" {
+            Ok(Self::All)
+        } else if let Some((domain, inner)) = s.split_once(":") {
+            Ok(match domain {
+                "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
+                "relay" => Self::Relay(RelayCap::from_str(inner)?),
+                "net-diagnostics" => Self::NetDiagnostics(NetDiagnosticsCap::from_str(inner)?),
+                _ => bail!("invalid cap domain"),
+            })
+        } else {
+            Err(anyhow::anyhow!("invalid cap string"))
+        }
+    }
+}
+
+cap_enum!(
+    pub enum MetricsCap {
+        PutAny,
+    }
+);
+
+cap_enum!(
+    pub enum RelayCap {
+        Use,
+    }
+);
+
+cap_enum!(
+    pub enum NetDiagnosticsCap {
+        PutAny,
+        GetAny,
+    }
+);
+
+impl Caps {
+    pub fn new(caps: impl IntoIterator<Item = impl Into<Cap>>) -> Self {
+        Self::V0(CapSet::new(caps))
+    }
+
+    /// Returns the capabilities granted by a shared API secret.
+    pub fn for_shared_secret() -> Self {
+        Self::new([Cap::Client])
+    }
+
+    /// Returns the maximum set of capabilities.
+    pub fn all() -> Self {
+        Self::new([Cap::All])
+    }
+
+    pub fn extend(self, caps: impl IntoIterator<Item = impl Into<Cap>>) -> Self {
+        let Self::V0(mut set) = self;
+        set.extend(caps.into_iter().map(Into::into));
+        Self::V0(set)
+    }
+
+    pub fn from_strs<'a>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self> {
+        Ok(Self::V0(CapSet::from_strs(strs)?))
+    }
+
+    pub fn to_strings(&self) -> Vec<String> {
+        let Self::V0(set) = self;
+        set.to_strings()
+    }
+
+    pub fn permits(&self, other: &Self) -> bool {
+        let Self::V0(slf) = self;
+        let Self::V0(other) = other;
+        slf.permits(other)
+    }
+}
+
+impl From<Cap> for Caps {
+    fn from(cap: Cap) -> Self {
+        Self::new([cap])
+    }
+}
+
+impl Cap {
+    pub fn permits(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Cap::All, _) => true,
+            (Cap::Client, other) => client_capabilities(other),
+            (Cap::Relay(slf), Cap::Relay(other)) => slf.permits(other),
+            (Cap::Metrics(slf), Cap::Metrics(other)) => slf.permits(other),
+            (Cap::NetDiagnostics(slf), Cap::NetDiagnostics(other)) => slf.permits(other),
+            (_, _) => false,
+        }
+    }
+}
+
+fn client_capabilities(other: &Cap) -> bool {
+    match other {
+        Cap::All => false,
+        Cap::Client => true,
+        Cap::Relay(RelayCap::Use) => true,
+        Cap::Metrics(MetricsCap::PutAny) => true,
+        Cap::NetDiagnostics(NetDiagnosticsCap::PutAny) => true,
+        Cap::NetDiagnostics(NetDiagnosticsCap::GetAny) => true,
+    }
+}
+
+impl MetricsCap {
+    pub fn permits(&self, other: &Self) -> bool {
+        match (self, other) {
+            (MetricsCap::PutAny, MetricsCap::PutAny) => true,
+        }
+    }
+}
+
+impl RelayCap {
+    pub fn permits(&self, other: &Self) -> bool {
+        match (self, other) {
+            (RelayCap::Use, RelayCap::Use) => true,
+        }
+    }
+}
+
+impl NetDiagnosticsCap {
+    pub fn permits(&self, other: &Self) -> bool {
+        match (self, other) {
+            (NetDiagnosticsCap::PutAny, NetDiagnosticsCap::PutAny) => true,
+            (NetDiagnosticsCap::GetAny, NetDiagnosticsCap::GetAny) => true,
+            (_, _) => false,
+        }
+    }
+}
+
+/// A set of capabilities.
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
+pub struct CapSet<C: Ord>(BTreeSet<C>);
+
+impl<C: Ord> Default for CapSet<C> {
+    fn default() -> Self {
+        Self(BTreeSet::new())
+    }
+}
+
+impl<C: Ord> CapSet<C> {
+    pub fn new(set: impl IntoIterator<Item = impl Into<C>>) -> Self {
+        Self(BTreeSet::from_iter(set.into_iter().map(Into::into)))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &'_ C> + '_ {
+        self.0.iter()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn contains(&self, cap: impl Into<C>) -> bool {
+        let cap = cap.into();
+        self.0.contains(&cap)
+    }
+
+    pub fn extend(&mut self, caps: impl IntoIterator<Item = impl Into<C>>) {
+        self.0.extend(caps.into_iter().map(Into::into));
+    }
+
+    pub fn insert(&mut self, cap: impl Into<C>) -> bool {
+        self.0.insert(cap.into())
+    }
+
+    pub fn from_strs<'a, E>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self>
+    where
+        C: FromStr<Err = E>,
+        Result<C, E>: anyhow::Context<C, E>,
+    {
+        let mut caps = Self::default();
+        for s in strs {
+            let cap = C::from_str(s).with_context(|| format!("Unknown capability: {s}"))?;
+            caps.insert(cap);
+        }
+        Ok(caps)
+    }
+
+    pub fn to_strings(&self) -> Vec<String>
+    where
+        C: fmt::Display,
+    {
+        self.iter().map(ToString::to_string).collect()
+    }
+}
+
+impl CapSet<Cap> {
+    pub fn permits(&self, other: &Self) -> bool {
+        other
+            .iter()
+            .all(|other_cap| self.iter().any(|self_cap| self_cap.permits(other_cap)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smoke() {
+        let all = Caps::default()
+            .extend([RelayCap::Use])
+            .extend([MetricsCap::PutAny]);
+
+        let strings = all.to_strings();
+        let parsed = Caps::from_strs(strings.iter().map(|s| s.as_str())).unwrap();
+        assert_eq!(all, parsed);
+
+        let s = ["metrics:put-any", "relay:use"];
+        let caps = Caps::from_strs(s).unwrap();
+        assert_eq!(
+            caps,
+            Caps::new([MetricsCap::PutAny]).extend([RelayCap::Use])
+        );
+
+        let full = Caps::new([Cap::All]);
+        assert!(full.permits(&full));
+        assert!(full.permits(&all));
+        assert!(!all.permits(&full));
+
+        let metrics = Caps::new([MetricsCap::PutAny]);
+        let relay = Caps::new([RelayCap::Use]);
+
+        for cap in [&metrics, &relay] {
+            assert!(full.permits(cap));
+            assert!(all.permits(cap));
+            assert!(!cap.permits(&full));
+            assert!(!cap.permits(&all));
+        }
+
+        assert!(!metrics.permits(&relay));
+        assert!(!relay.permits(&metrics));
+    }
+
+    #[test]
+    fn client_caps() {
+        let client = Caps::new([Cap::Client]);
+        let empty = Caps::default();
+        let all = Caps::new([Cap::All]);
+        let metrics = Caps::new([MetricsCap::PutAny]);
+        let relay = Caps::new([RelayCap::Use]);
+
+        assert!(client.permits(&empty));
+        assert!(client.permits(&client));
+        assert!(client.permits(&metrics));
+        assert!(client.permits(&relay));
+        assert!(!client.permits(&all));
+    }
+}

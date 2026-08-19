@@ -32,12 +32,13 @@ mod client;
 mod client_host;
 #[cfg(not(wasm_browser))]
 mod openssh;
+mod token;
 
 pub mod api_secret;
 pub mod caps;
 pub mod net_diagnostics;
 mod preset;
-pub mod protocol;
+mod protocol;
 
 mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
@@ -56,8 +57,9 @@ pub static IROH_VERSION: std::sync::LazyLock<&str> = std::sync::LazyLock::new(||
 });
 
 pub use anyhow;
-pub use client_host::{CLIENT_HOST_ALPN, ClientHost, ClientHostClient};
+pub use client_host::ClientHost;
 pub use iroh_metrics::Registry;
+pub use token::CapabilityToken;
 
 pub use self::{
     api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
@@ -66,5 +68,5 @@ pub use self::{
     },
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
     preset::{IrohServicesPreset, PresetBuilder, preset},
-    protocol::ALPN,
+    protocol::{ALPN, CLIENT_HOST_ALPN},
 };

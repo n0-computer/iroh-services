@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use iroh::{
     Endpoint, EndpointAddr, EndpointId,
     endpoint::{ConnectError, Connection},
@@ -203,10 +203,10 @@ impl ClientBuilder {
     /// capabilities.
     ///
     /// API secrets include remote details within them, and will set both the
-    /// remote and rcan values on the builder
+    /// remote and capability token values on the builder
     pub fn api_secret(mut self, ticket: ApiSecret) -> Result<Self> {
         let local_id = self.endpoint.id();
-        let rcan = crate::caps::create_api_token_from_secret_key(
+        let token = crate::caps::create_api_token_from_secret_key(
             ticket.secret,
             local_id,
             self.cap_expiry,
@@ -214,7 +214,8 @@ impl ClientBuilder {
         )?;
 
         self.remote = Some(ticket.remote);
-        self.rcan(rcan)
+        self.cap.replace(token.into_rcan());
+        Ok(self)
     }
 
     /// Loads the private ssh key from the given path, and creates the needed capability.
@@ -230,24 +231,14 @@ impl ClientBuilder {
     #[cfg(not(wasm_browser))]
     pub fn ssh_key(mut self, pem: &str) -> Result<Self> {
         let local_id = self.endpoint.id();
-        let rcan = crate::caps::create_api_token_from_openssh_pem(
+        let token = crate::caps::create_api_token_from_openssh_pem(
             pem,
             local_id,
             self.cap_expiry,
             Caps::all(),
         )?;
-        self.cap.replace(rcan);
+        self.cap.replace(token.into_rcan());
 
-        Ok(self)
-    }
-
-    /// Sets the rcan directly.
-    pub fn rcan(mut self, cap: Rcan<Caps>) -> Result<Self> {
-        ensure!(
-            EndpointId::from_verifying_key(*cap.audience()) == self.endpoint.id(),
-            "invalid audience"
-        );
-        self.cap.replace(cap);
         Ok(self)
     }
 
@@ -603,7 +594,8 @@ impl Client {
             DEFAULT_CAP_EXPIRY,
             Caps::new(caps),
         )
-        .map_err(Error::Other)?;
+        .map_err(Error::Other)?
+        .into_rcan();
 
         let (tx, rx) = oneshot::channel();
         self.message_channel
@@ -1065,7 +1057,7 @@ mod tests {
     use crate::{
         Client, ClientBuilder,
         api_secret::ApiSecret,
-        caps::{Cap, Caps, create_api_token_from_secret_key},
+        caps::{Cap, Caps},
         client::{
             API_SECRET_ENV_VAR_NAME, BuildError, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH,
             CLIENT_ATTRIBUTES_MAX_COUNT, CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError,
@@ -1199,18 +1191,11 @@ mod tests {
             .spawn();
 
         let shared_secret = SecretKey::from_bytes(&rng.random());
-        let cap = create_api_token_from_secret_key(
-            shared_secret,
-            client_ep.id(),
-            Duration::from_secs(3600),
-            Caps::for_shared_secret(),
-        )
-        .unwrap();
-
+        let api_secret = ApiSecret::new(shared_secret, server_ep.id());
         let builder = Client::builder(&client_ep)
-            .remote(server_ep.addr())
-            .rcan(cap)
-            .unwrap();
+            .api_secret(api_secret)
+            .unwrap()
+            .remote(server_ep.addr());
         (router, client_ep, builder)
     }
 

@@ -7,18 +7,13 @@ use iroh::{
 use irpc::WithChannels;
 use irpc_iroh::read_request;
 use n0_error::AnyError;
-use rcan::{Capability, CapabilityOrigin, Rcan};
+use rcan::{CapabilityOrigin, Rcan};
 use tracing::{debug, warn};
 
 use crate::{
     caps::{Caps, NetDiagnosticsCap},
     protocol::{ClientHostProtocol, NetDiagnosticsMessage, RemoteError},
 };
-
-/// The ALPN for sending messages from the cloud node to the client.
-pub const CLIENT_HOST_ALPN: &[u8] = b"n0/n0des-client-host/1";
-
-pub type ClientHostClient = irpc::Client<ClientHostProtocol>;
 
 /// Protocol handler for cloud-to-endpoint connections.
 #[derive(Debug)]
@@ -139,9 +134,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        ALPN,
+        ALPN, CLIENT_HOST_ALPN,
         caps::create_grant_token,
-        protocol::{Auth, IrohServicesClient, RunNetworkDiagnostics},
+        protocol::{Auth, ClientHostClient, IrohServicesClient, RunNetworkDiagnostics},
     };
 
     #[tokio::test]
@@ -171,7 +166,8 @@ mod tests {
             Duration::from_secs(3600),
             Caps::for_shared_secret(),
         )
-        .unwrap();
+        .unwrap()
+        .into_rcan();
 
         // Connect on the net diagnostics ALPN
         let conn = IrohLazyRemoteConnection::new(
@@ -220,7 +216,8 @@ mod tests {
             Duration::from_secs(3600),
             Caps::for_shared_secret(),
         )
-        .unwrap();
+        .unwrap()
+        .into_rcan();
 
         let conn =
             IrohLazyRemoteConnection::new(client_ep.clone(), server_ep.addr(), ALPN.to_vec());

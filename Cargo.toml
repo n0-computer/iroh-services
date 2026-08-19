@@ -10,21 +10,24 @@ repository = "https://github.com/n0-computer/iroh-services"
 keywords = ["quic", "networking", "holepunching", "p2p"]
 rust-version = "1.91"
 
+[workspace]
+members = ["iroh-services-proto"]
+resolver = "3"
+
 [dependencies]
 anyhow = "1.0.95"
 data-encoding = "2.9.0"
-derive_more = { version = "2.0.1", features = ["display", "from"] }
 ed25519-dalek = { version = "=3.0.0-rc.0" }
 irpc = { version = "0.17", default-features = false, features = ["derive", "stream", "spans"] }
 irpc-iroh = "0.17"
 iroh = { version = "1.0.0", default-features = false, features = ["unstable-net-report"] }
 iroh-metrics = { version = "1.0.0", default-features = false }
+iroh-services-proto = { version = "0.1.0", path = "iroh-services-proto" }
 iroh-tickets = "1.0.0"
 n0-error = "1.0.0"
 n0-future = "0.3"
 rcan = "0.4"
 serde = { version = "1.0.217", features = ["derive"] }
-strum = { version = "0.28", features = ["derive"] }
 thiserror = "2.0.12"
 tokio = { version = "1", default-features = false, features = ["sync"] }
 tokio-util = { version = "0.7", default-features = false }
