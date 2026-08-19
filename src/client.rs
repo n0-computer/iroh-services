@@ -1126,7 +1126,7 @@ mod tests {
     use temp_env_vars::temp_env_vars;
 
     use crate::{
-        Client,
+        Client, ClientBuilder,
         api_secret::ApiSecret,
         caps::{Cap, Caps, create_api_token_from_secret_key},
         client::{
@@ -1144,27 +1144,44 @@ mod tests {
         decoded_items: usize,
     }
 
+    /// What the test server recorded, in arrival order.
+    #[derive(Debug)]
+    enum Seen {
+        Metrics(SeenUpdate),
+        /// A Ping whose response reached the client without the stream failing.
+        PingAnswered,
+    }
+
     /// In-process stand-in for the services backend.
     ///
     /// Mirrors the real server's session rules: the first request on every
     /// connection must be Auth, a repeat Auth on a live connection closes it,
-    /// and the metrics decoder lives per connection.
+    /// and the metrics decoder lives per connection. Requests are read one at
+    /// a time and any error ends the connection, as in the backend, so a
+    /// client that drops a request mid-flight takes the connection with it.
     #[derive(Debug)]
-    struct RecordingServer {
-        seen: tokio::sync::mpsc::UnboundedSender<SeenUpdate>,
+    struct TestServer {
+        seen: tokio::sync::mpsc::UnboundedSender<Seen>,
+        /// Kills the next connection without answering, simulating a restart.
         drop_next: Arc<AtomicBool>,
+        /// Held before answering a Ping, so a test can catch one in flight.
+        ping_delay: Duration,
     }
 
-    impl ProtocolHandler for RecordingServer {
-        async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
-            self.handle_connection(connection).await.map_err(|e| {
-                let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
-                AcceptError::from(AnyError::from(boxed))
-            })
+    impl TestServer {
+        fn new(seen: tokio::sync::mpsc::UnboundedSender<Seen>) -> Self {
+            Self {
+                seen,
+                drop_next: Arc::new(AtomicBool::new(false)),
+                ping_delay: Duration::ZERO,
+            }
         }
-    }
 
-    impl RecordingServer {
+        fn ping_delay(mut self, delay: Duration) -> Self {
+            self.ping_delay = delay;
+            self
+        }
+
         async fn handle_connection(&self, connection: Connection) -> anyhow::Result<()> {
             let Some(first_request) = read_request::<IrohServicesProtocol>(&connection).await?
             else {
@@ -1178,7 +1195,8 @@ mod tests {
 
             let mut decoder = Decoder::default();
             loop {
-                let Some(request) = read_request::<IrohServicesProtocol>(&connection).await? else {
+                let Ok(Some(request)) = read_request::<IrohServicesProtocol>(&connection).await
+                else {
                     return Ok(());
                 };
                 if self.drop_next.swap(false, Ordering::SeqCst) {
@@ -1192,14 +1210,23 @@ mod tests {
                         connection.close(400u32.into(), b"Unexpected auth message");
                         anyhow::bail!("client re-sent auth on a live connection");
                     }
+                    ServicesMessage::Ping(WithChannels { inner, tx, .. }) => {
+                        n0_future::time::sleep(self.ping_delay).await;
+                        // A client that dropped this request has reset the
+                        // stream, and this send is where the server finds out.
+                        tx.send(Pong {
+                            req_id: inner.req_id,
+                        })
+                        .await?;
+                        let _ = self.seen.send(Seen::PingAnswered);
+                    }
                     ServicesMessage::PutMetrics(WithChannels { inner, tx, .. }) => {
                         let has_schema = inner.update.schema.is_some();
                         decoder.import(inner.update);
-                        let decoded_items = decoder.iter().count();
-                        let _ = self.seen.send(SeenUpdate {
+                        let _ = self.seen.send(Seen::Metrics(SeenUpdate {
                             has_schema,
-                            decoded_items,
-                        });
+                            decoded_items: decoder.iter().count(),
+                        }));
                         tx.send(Ok(())).await?;
                     }
                     _ => {
@@ -1211,27 +1238,29 @@ mod tests {
         }
     }
 
-    /// A reconnect must make the next metrics update carry the schema.
+    impl ProtocolHandler for TestServer {
+        async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+            self.handle_connection(connection).await.map_err(|e| {
+                let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
+                AcceptError::from(AnyError::from(boxed))
+            })
+        }
+    }
+
+    /// Spawns `server` on its own endpoint and returns a client builder aimed
+    /// at it, with the router and the client endpoint for teardown.
     ///
-    /// The server holds one decoder per connection, so the first update after
-    /// a re-auth is undecodable unless the schema comes along again.
-    #[tokio::test]
-    async fn test_metrics_schema_resent_after_reconnect() {
-        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(2);
+    /// The metrics interval is left to the caller, since that is what the
+    /// tests vary. The test server accepts any capability, so a self-issued
+    /// token works.
+    async fn spawn_test_server(seed: u64, server: TestServer) -> (Router, Endpoint, ClientBuilder) {
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(seed);
         let server_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
         let client_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
-
-        let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
-        let drop_next = Arc::new(AtomicBool::new(false));
-        let server = RecordingServer {
-            seen: seen_tx,
-            drop_next: drop_next.clone(),
-        };
         let router = Router::builder(server_ep.clone())
             .accept(ALPN, server)
             .spawn();
 
-        // The test server accepts any capability, so a self-issued token works.
         let shared_secret = SecretKey::from_bytes(&rng.random());
         let cap = create_api_token_from_secret_key(
             shared_secret,
@@ -1241,18 +1270,46 @@ mod tests {
         )
         .unwrap();
 
-        let client = Client::builder(&client_ep)
-            .disable_metrics_interval()
+        let builder = Client::builder(&client_ep)
             .remote(server_ep.addr())
             .rcan(cap)
-            .unwrap()
-            .build()
-            .await
             .unwrap();
+        (router, client_ep, builder)
+    }
+
+    /// Awaits the next metrics push the server recorded.
+    async fn next_metrics(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Seen>) -> SeenUpdate {
+        match rx.recv().await.expect("server dropped the record channel") {
+            Seen::Metrics(update) => update,
+            other => panic!("expected a metrics push, recorded {other:?}"),
+        }
+    }
+
+    /// Takes everything the server has recorded so far, without waiting.
+    fn recorded_so_far(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Seen>) -> Vec<Seen> {
+        let mut seen = Vec::new();
+        while let Ok(record) = rx.try_recv() {
+            seen.push(record);
+        }
+        seen
+    }
+
+    /// A reconnect must make the next metrics update carry the schema.
+    ///
+    /// The server holds one decoder per connection, so the first update after
+    /// a re-auth is undecodable unless the schema comes along again.
+    #[tokio::test]
+    async fn test_metrics_schema_resent_after_reconnect() {
+        let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
+        let server = TestServer::new(seen_tx);
+        let drop_next = server.drop_next.clone();
+        let (router, client_ep, builder) = spawn_test_server(2, server).await;
+
+        let client = builder.disable_metrics_interval().build().await.unwrap();
 
         // The first export on a fresh session carries the schema.
         client.push_metrics().await.unwrap();
-        let first = seen_rx.recv().await.unwrap();
+        let first = next_metrics(&mut seen_rx).await;
         assert!(first.has_schema);
         assert!(first.decoded_items > 0);
 
@@ -1263,7 +1320,7 @@ mod tests {
         let mut settled = false;
         for _ in 0..20 {
             client.push_metrics().await.unwrap();
-            let seen = seen_rx.recv().await.unwrap();
+            let seen = next_metrics(&mut seen_rx).await;
             assert!(seen.decoded_items > 0);
             if !seen.has_schema {
                 settled = true;
@@ -1279,7 +1336,7 @@ mod tests {
         // The client re-dials and re-auths; the first update on the new
         // connection must include the schema for the server's fresh decoder.
         client.push_metrics().await.unwrap();
-        let third = seen_rx.recv().await.unwrap();
+        let third = next_metrics(&mut seen_rx).await;
         assert!(third.has_schema, "schema must be re-sent after a reconnect");
         assert!(third.decoded_items > 0);
 
@@ -1399,77 +1456,21 @@ mod tests {
     /// schema resend and then hit the same limit again.
     #[test]
     fn test_oversized_message_keeps_the_connection() {
-        let oversized = irpc::Error::Send {
-            source: irpc::channel::SendError::MaxMessageSizeExceeded {
-                meta: Default::default(),
-            },
+        let send_error = |source| irpc::Error::Send {
+            source,
             meta: Default::default(),
         };
-        assert!(!is_connection_lost(&oversized));
 
-        let closed = irpc::Error::Send {
-            source: irpc::channel::SendError::ReceiverClosed {
+        assert!(!is_connection_lost(&send_error(
+            irpc::channel::SendError::MaxMessageSizeExceeded {
                 meta: Default::default(),
-            },
-            meta: Default::default(),
-        };
-        assert!(is_connection_lost(&closed));
-    }
-
-    /// Mirrors the backend's request loop: reads are sequential and any error
-    /// ends the loop and the connection with it.
-    #[derive(Debug)]
-    struct SlowServer {
-        /// Set once the server has answered a Ping without the stream failing.
-        ping_answered: Arc<AtomicBool>,
-        /// Counts metrics pushes the server actually read.
-        metrics_seen: Arc<std::sync::atomic::AtomicUsize>,
-    }
-
-    impl ProtocolHandler for SlowServer {
-        async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
-            self.handle(connection).await.map_err(|e| {
-                let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
-                AcceptError::from(AnyError::from(boxed))
-            })
-        }
-    }
-
-    impl SlowServer {
-        async fn handle(&self, connection: Connection) -> anyhow::Result<()> {
-            let Some(first) = read_request::<IrohServicesProtocol>(&connection).await? else {
-                return Ok(());
-            };
-            let ServicesMessage::Auth(WithChannels { tx, .. }) = first else {
-                anyhow::bail!("expected auth first");
-            };
-            tx.send(()).await?;
-
-            loop {
-                let Ok(Some(request)) = read_request::<IrohServicesProtocol>(&connection).await
-                else {
-                    return Ok(());
-                };
-                match request {
-                    ServicesMessage::Ping(WithChannels { inner, tx, .. }) => {
-                        // long enough for shutdown to land while this is in flight
-                        n0_future::time::sleep(Duration::from_millis(300)).await;
-                        // a client that dropped the request resets the stream,
-                        // and this send is where the server finds out
-                        tx.send(Pong {
-                            req_id: inner.req_id,
-                        })
-                        .await?;
-                        self.ping_answered.store(true, Ordering::SeqCst);
-                    }
-                    ServicesMessage::PutMetrics(WithChannels { tx, .. }) => {
-                        self.metrics_seen.fetch_add(1, Ordering::SeqCst);
-                        tx.send(Ok(())).await?;
-                    }
-                    _ => anyhow::bail!("unexpected request"),
-                }
             }
-        }
+        )));
+        assert!(is_connection_lost(&send_error(
+            irpc::channel::SendError::ReceiverClosed {
+                meta: Default::default(),
+            }
+        )));
     }
 
     /// Assert that shutting down with a request in flight lets that request
@@ -1480,45 +1481,23 @@ mod tests {
     /// that shutdown exists for is never seen.
     #[tokio::test]
     async fn test_shutdown_drains_request_in_flight() {
-        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(9);
-        let server_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
-        let client_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
-
-        let ping_answered = Arc::new(AtomicBool::new(false));
-        let metrics_seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let router = Router::builder(server_ep.clone())
-            .accept(
-                ALPN,
-                SlowServer {
-                    ping_answered: ping_answered.clone(),
-                    metrics_seen: metrics_seen.clone(),
-                },
-            )
-            .spawn();
-
-        let shared_secret = SecretKey::from_bytes(&rng.random());
-        let cap = create_api_token_from_secret_key(
-            shared_secret,
-            client_ep.id(),
-            Duration::from_secs(3600),
-            Caps::for_shared_secret(),
+        let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (router, client_ep, builder) = spawn_test_server(
+            9,
+            // long enough for shutdown to land while a ping is in flight
+            TestServer::new(seen_tx).ping_delay(Duration::from_millis(300)),
         )
-        .unwrap();
+        .await;
 
-        let client = Client::builder(&client_ep)
-            .rcan(cap)
-            .unwrap()
-            .remote(server_ep.addr())
+        let client = builder
             // long enough that only the startup tick fires on its own
             .metrics_interval(Duration::from_secs(3600))
             .build()
             .await
             .unwrap();
 
-        // let the startup metrics push establish the connection
-        n0_future::time::sleep(Duration::from_millis(500)).await;
-        let after_startup = metrics_seen.load(Ordering::SeqCst);
-        assert_eq!(after_startup, 1, "expected the startup metrics push");
+        // the startup push is what establishes the connection
+        next_metrics(&mut seen_rx).await;
 
         // put a ping in flight, then shut down while the server sits on it
         let pinging = client.clone();
@@ -1526,18 +1505,21 @@ mod tests {
         n0_future::time::sleep(Duration::from_millis(100)).await;
         client.shutdown().await;
 
+        let recorded = recorded_so_far(&mut seen_rx);
         assert!(
-            ping_answered.load(Ordering::SeqCst),
+            recorded
+                .iter()
+                .any(|seen| matches!(seen, Seen::PingAnswered)),
             "the ping in flight was dropped, so the server saw its stream fail"
         );
-        assert_eq!(
-            metrics_seen.load(Ordering::SeqCst),
-            after_startup + 1,
+        assert!(
+            recorded.iter().any(|seen| matches!(seen, Seen::Metrics(_))),
             "the final metrics push did not reach the server"
         );
 
         let _ = ping.await;
         router.shutdown().await.unwrap();
+        client_ep.close().await;
     }
 
     /// Assert that shutdown does not wait for a request in flight.
