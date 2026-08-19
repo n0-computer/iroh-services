@@ -67,6 +67,8 @@ async fn main() -> Result<()> {
 
     println!("waiting for remote diagnostics requests. ctrl+c to exit.");
     tokio::signal::ctrl_c().await?;
+    // push the metrics accumulated since the last interval tick
+    client.shutdown().await;
     router.endpoint().close().await;
     t.abort();
 
