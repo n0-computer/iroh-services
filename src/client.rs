@@ -641,6 +641,23 @@ enum ClientActorMessage {
     },
 }
 
+/// Whether an rpc error means the connection can no longer carry requests.
+///
+/// Most of these are the stream pair or the connection itself failing, so the
+/// connection has to go. An oversized message is the exception: irpc rejects it
+/// locally before anything reaches the wire, so the connection is still fine.
+/// Re-dialing on it would pay for a handshake and a full metrics schema resend
+/// only to hit the same limit on the retry.
+fn is_connection_lost(err: &irpc::Error) -> bool {
+    !matches!(
+        err,
+        irpc::Error::Send {
+            source: irpc::channel::SendError::MaxMessageSizeExceeded { .. },
+            ..
+        }
+    )
+}
+
 /// An irpc client bound to a single authenticated connection.
 ///
 /// The server accepts requests only after an `Auth` as the very first
@@ -917,11 +934,12 @@ impl ClientActor {
         trace!(request = %msg, "client actor send request");
         let client = self.connect().await?;
         let res = client.rpc(msg).await;
-        if res.is_err() {
-            // A transport-level failure means the connection is gone or in an
-            // unknown state; the next request dials and authenticates afresh.
-            // Server-side errors arrive as `Ok(Err(RemoteError))` and keep the
-            // connection.
+        if let Err(err) = &res
+            && is_connection_lost(err)
+        {
+            // The connection is gone or in an unknown state; the next request
+            // dials and authenticates afresh. Server-side errors arrive as
+            // `Ok(Err(RemoteError))` and keep the connection.
             self.client = None;
         }
         res.inspect_err(|err| warn!("rpc error: {err}"))
@@ -1092,7 +1110,7 @@ mod tests {
         client::{
             API_SECRET_ENV_VAR_NAME, BuildError, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH,
             CLIENT_ATTRIBUTES_MAX_COUNT, CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError,
-            ValidateNameError,
+            ValidateNameError, is_connection_lost,
         },
         protocol::{ALPN, IrohServicesProtocol, ServicesMessage},
     };
@@ -1352,6 +1370,28 @@ mod tests {
         // the actor is gone, so requests fail
         let err = client.push_metrics().await;
         assert!(err.is_err());
+    }
+
+    /// An oversized message never reaches the wire, so it must not cost the
+    /// connection: re-dialing would pay for a handshake and a full metrics
+    /// schema resend and then hit the same limit again.
+    #[test]
+    fn test_oversized_message_keeps_the_connection() {
+        let oversized = irpc::Error::Send {
+            source: irpc::channel::SendError::MaxMessageSizeExceeded {
+                meta: Default::default(),
+            },
+            meta: Default::default(),
+        };
+        assert!(!is_connection_lost(&oversized));
+
+        let closed = irpc::Error::Send {
+            source: irpc::channel::SendError::ReceiverClosed {
+                meta: Default::default(),
+            },
+            meta: Default::default(),
+        };
+        assert!(is_connection_lost(&closed));
     }
 
     /// Assert that shutdown does not wait for a request in flight.
