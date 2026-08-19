@@ -866,6 +866,13 @@ impl ClientActor {
     /// The server keeps one metrics decoder per connection, so a fresh
     /// connection also gets a fresh encoder: the next metrics export then
     /// carries the full schema for the server's fresh decoder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the dial, or the authentication that follows it,
+    /// fails. A connection is stored only once both have succeeded, and a
+    /// connection found closed is cleared before either is attempted, so a
+    /// caller that sees an error has nothing left to clean up.
     async fn connect(&mut self) -> Result<&IrohServicesClient, Error> {
         // A connection the remote has closed (server restart, error close)
         // can't carry requests anymore; drop it and re-dial.
