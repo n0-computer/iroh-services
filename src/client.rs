@@ -17,6 +17,7 @@ use n0_error::StackResultExt;
 use n0_future::{task::AbortOnDropHandle, time::Duration};
 use rcan::Rcan;
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
@@ -59,6 +60,8 @@ pub struct Client {
     #[allow(dead_code)]
     endpoint: Endpoint,
     message_channel: tokio::sync::mpsc::Sender<ClientActorMessage>,
+    /// Cancelled by [`Client::shutdown`] to stop whatever the actor is doing.
+    shutdown: CancellationToken,
     _actor_task: Arc<AbortOnDropHandle<()>>,
 }
 
@@ -263,6 +266,7 @@ impl ClientBuilder {
 
         let registry = Arc::new(RwLock::new(self.registry));
         let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let shutdown = CancellationToken::new();
         let actor_task = AbortOnDropHandle::new(n0_future::task::spawn(
             ClientActor {
                 capabilities,
@@ -276,12 +280,13 @@ impl ClientBuilder {
                 encoder: Encoder::new(registry.clone()),
                 registry,
             }
-            .run(self.metrics_interval, rx),
+            .run(self.metrics_interval, rx, shutdown.clone()),
         ));
 
         Ok(Client {
             endpoint: self.endpoint,
             message_channel: tx,
+            shutdown,
             _actor_task: Arc::new(actor_task),
         })
     }
@@ -325,6 +330,13 @@ impl From<irpc::Error> for BuildError {
         }
     }
 }
+
+/// How long [`Client::shutdown`] waits for the final metrics push.
+///
+/// The push goes over an established connection, so it is normally well under
+/// this. The bound covers a peer that has gone silent without closing, where
+/// the request would otherwise hang until the connection times out.
+const SHUTDOWN_FLUSH_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Minimum length in bytes for an endpoint name.
 pub const CLIENT_NAME_MIN_LENGTH: usize = 2;
@@ -516,25 +528,20 @@ impl Client {
 
     /// Shuts down the client, pushing one final round of metrics first.
     ///
-    /// The final push only happens when the metrics interval is enabled, and
-    /// is best effort: push errors are logged and ignored. After this returns
-    /// the background actor has stopped, so requests on any clone of this
-    /// client will fail. Dropping the client without calling this aborts the
-    /// actor immediately, losing any metrics accumulated since the last
-    /// interval push.
+    /// Returns once the background actor has stopped, so requests on any clone
+    /// of this client will fail afterwards. Dropping the client without calling
+    /// this aborts the actor immediately, losing any metrics accumulated since
+    /// the last interval push.
+    ///
+    /// Any request in flight is cancelled rather than awaited, so a client that
+    /// cannot reach the server shuts down promptly instead of inheriting that
+    /// request's timeout. The final push is best effort: it happens only when
+    /// the metrics interval is enabled and a connection is already established,
+    /// gets a few seconds to complete, and errors are logged and ignored.
     pub async fn shutdown(&self) {
-        let (tx, rx) = oneshot::channel();
-        if self
-            .message_channel
-            .send(ClientActorMessage::Shutdown { done: tx })
-            .await
-            .is_err()
-        {
-            trace!("Shutdown called but actor already stopped");
-            // actor already stopped
-            return;
-        }
-        let _ = rx.await;
+        self.shutdown.cancel();
+        // The actor drops the inbox receiver on its way out.
+        self.message_channel.closed().await;
     }
 
     /// Grant capabilities to a remote endpoint. Creates a signed RCAN token
@@ -632,9 +639,6 @@ enum ClientActorMessage {
         // known, and can fail with a local `InvalidAttributes` error.
         done: oneshot::Sender<Result<(), Error>>,
     },
-    Shutdown {
-        done: oneshot::Sender<()>,
-    },
 }
 
 /// An irpc client bound to a single authenticated connection.
@@ -693,10 +697,42 @@ struct ClientActor {
 }
 
 impl ClientActor {
+    /// Runs the actor until the inbox closes or `shutdown` is cancelled, then
+    /// pushes one final round of metrics.
+    ///
+    /// Cancellation drops whatever [`Self::run_inner`] is awaiting, so a
+    /// request in flight, most importantly a dial to a server that never
+    /// answers, does not hold up the shutdown.
     async fn run(
         mut self,
         interval: Option<Duration>,
         mut inbox: tokio::sync::mpsc::Receiver<ClientActorMessage>,
+        shutdown: CancellationToken,
+    ) {
+        let metrics_enabled = interval.is_some();
+        tokio::select! {
+            biased;
+            () = shutdown.cancelled() => trace!("client actor cancelled"),
+            () = self.run_inner(interval, &mut inbox) => {},
+        }
+
+        // Flush only over a connection that already exists. Dialing here would
+        // reintroduce the stall that cancelling just avoided, and an endpoint
+        // that never connected has nothing the server could attribute.
+        if metrics_enabled && self.is_connected() {
+            match n0_future::time::timeout(SHUTDOWN_FLUSH_TIMEOUT, self.send_metrics()).await {
+                Ok(Ok(())) => trace!("pushed final metrics on shutdown"),
+                Ok(Err(err)) => debug!(%err, "failed to push final metrics on shutdown"),
+                Err(_) => debug!("final metrics push on shutdown timed out"),
+            }
+        }
+        debug!("client actor shut down");
+    }
+
+    async fn run_inner(
+        &mut self,
+        interval: Option<Duration>,
+        inbox: &mut tokio::sync::mpsc::Receiver<ClientActorMessage>,
     ) {
         let mut metrics_timer = interval.map(|interval| n0_future::time::interval(interval));
         trace!("starting client actor");
@@ -797,15 +833,6 @@ impl ClientActor {
                                 warn!("failed to publish network diagnostics: {:#?}", err);
                             }
                         }
-                        ClientActorMessage::Shutdown { done } => {
-                            if metrics_timer.is_some()
-                                && let Err(err) = self.send_metrics().await
-                            {
-                                debug!("failed to push final metrics on shutdown: {:#?}", err);
-                            }
-                            let _ = done.send(());
-                            break;
-                        }
                     }
                 }
                 _ = async {
@@ -822,7 +849,16 @@ impl ClientActor {
                 },
             }
         }
-        debug!("client actor shut down");
+    }
+
+    /// Whether a connection is established and still usable.
+    ///
+    /// Distinct from holding a [`RpcClient`]: the remote may have closed the
+    /// connection since, in which case sending over it would have to re-dial.
+    fn is_connected(&self) -> bool {
+        self.client
+            .as_ref()
+            .is_some_and(|client| client.connection.close_reason().is_none())
     }
 
     /// Returns the client for the active connection, establishing one if needed.
@@ -1302,6 +1338,41 @@ mod tests {
         // the actor is gone, so requests fail
         let err = client.push_metrics().await;
         assert!(err.is_err());
+    }
+
+    /// Assert that shutdown does not wait for a request in flight.
+    ///
+    /// The metrics interval fires as soon as the actor starts, so with an
+    /// unreachable remote the actor is inside a dial that runs for about a
+    /// minute. Shutting down has to cancel that dial rather than queue behind
+    /// it.
+    #[tokio::test]
+    async fn test_shutdown_cancels_dial_in_flight() {
+        let mut rng = rand::rngs::ChaCha8Rng::seed_from_u64(3);
+        let shared_secret = SecretKey::from_bytes(&rng.random());
+        let fake_endpoint_id = SecretKey::from_bytes(&rng.random()).public();
+        let api_secret = ApiSecret::new(shared_secret, fake_endpoint_id);
+
+        let endpoint = Endpoint::builder(presets::Minimal).bind().await.unwrap();
+
+        let client = Client::builder(&endpoint)
+            .api_secret(api_secret)
+            .unwrap()
+            // TEST-NET-1, routable but silently dropped, so the dial hangs
+            // instead of failing fast the way an address-less remote would.
+            .remote(
+                EndpointAddr::new(fake_endpoint_id).with_ip_addr("192.0.2.1:1234".parse().unwrap()),
+            )
+            .build()
+            .await
+            .unwrap();
+
+        // let the startup metrics tick get as far as the dial
+        n0_future::time::sleep(Duration::from_millis(200)).await;
+
+        n0_future::time::timeout(Duration::from_secs(5), client.shutdown())
+            .await
+            .expect("shutdown blocked on the dial in flight");
     }
 
     #[tokio::test]
