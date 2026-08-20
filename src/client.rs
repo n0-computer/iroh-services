@@ -28,10 +28,10 @@ use crate::{
     api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
     caps::{Caps, DEFAULT_CAP_EXPIRY},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
-    protocol::{
-        ALPN, Auth, GrantCap, IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong,
-        PutMetrics, PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
-    },
+};
+use iroh_services_proto::protocol::{
+    ALPN, Auth, GrantCap, IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong,
+    PutMetrics, PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
 };
 
 /// Client is the main handle for interacting with iroh-services. It communicates with
@@ -1063,8 +1063,8 @@ mod tests {
             CLIENT_ATTRIBUTES_MAX_COUNT, CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError,
             ValidateNameError, is_connection_lost,
         },
-        protocol::{ALPN, IrohServicesProtocol, Pong, ServicesMessage},
     };
+    use iroh_services_proto::protocol::{IrohServicesProtocol, Pong, ServicesMessage};
 
     /// What the test server recorded about one PutMetrics request.
     #[derive(Debug)]
@@ -1187,7 +1187,7 @@ mod tests {
         let server_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
         let client_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
         let router = Router::builder(server_ep.clone())
-            .accept(ALPN, server)
+            .accept(crate::ALPN, server)
             .spawn();
 
         let shared_secret = SecretKey::from_bytes(&rng.random());

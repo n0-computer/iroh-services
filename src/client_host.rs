@@ -10,10 +10,8 @@ use n0_error::AnyError;
 use rcan::{CapabilityOrigin, Rcan};
 use tracing::{debug, warn};
 
-use crate::{
-    caps::{Caps, NetDiagnosticsCap},
-    protocol::{ClientHostProtocol, NetDiagnosticsMessage, RemoteError},
-};
+use crate::caps::{Caps, NetDiagnosticsCap};
+use iroh_services_proto::protocol::{ClientHostProtocol, NetDiagnosticsMessage, RemoteError};
 
 /// Protocol handler for cloud-to-endpoint connections.
 #[derive(Debug)]
@@ -133,12 +131,10 @@ mod tests {
     use n0_future::time::Duration;
 
     use super::*;
-    use crate::{
-        ALPN, CLIENT_HOST_ALPN,
-        caps::create_grant_token,
-        protocol::{Auth, ClientHostClient, IrohServicesClient, RunNetworkDiagnostics},
+    use crate::{ALPN, CLIENT_HOST_ALPN, caps::create_grant_token};
+    use iroh_services_proto::protocol::{
+        Auth, ClientHostClient, IrohServicesClient, RunNetworkDiagnostics,
     };
-
     #[tokio::test]
     async fn test_diagnostics_host_run_diagnostics() {
         let lookup = MemoryLookup::new();

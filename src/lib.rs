@@ -38,7 +38,6 @@ pub mod api_secret;
 pub mod caps;
 pub mod net_diagnostics;
 mod preset;
-mod protocol;
 
 mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
@@ -68,5 +67,5 @@ pub use self::{
     },
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
     preset::{IrohServicesPreset, PresetBuilder, preset},
-    protocol::{ALPN, CLIENT_HOST_ALPN},
 };
+pub use iroh_services_proto::protocol::{ALPN, CLIENT_HOST_ALPN, RemoteError};
