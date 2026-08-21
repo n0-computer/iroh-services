@@ -17,6 +17,9 @@ on:
         description: 'Which git ref to checkout'
         type: string
         default: ${{ github.ref }}
+    secrets:
+      IROH_SERVICES_API_SECRET:
+        required: false
 
 env:
   RUST_BACKTRACE: 1

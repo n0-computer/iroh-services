@@ -29,7 +29,8 @@ jobs:
     name: CI Test Suite
     if: "github.event_name != 'pull_request' || ! contains(github.event.pull_request.labels.*.name, 'flaky-test')"
     uses: "./.github/workflows/tests.yaml"
-    secrets: inherit
+    secrets:
+      IROH_SERVICES_API_SECRET: ${{ secrets.IROH_SERVICES_API_SECRET }}
 
   cross_build:
     name: Cross Build Only
