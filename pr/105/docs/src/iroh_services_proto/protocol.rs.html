@@ -164,10 +164,10 @@
 <a href=#164 id=164 data-nosnippet>164</a>}
 <a href=#165 id=165 data-nosnippet>165</a>
 <a href=#166 id=166 data-nosnippet>166</a><span class="doccomment">/// Maximum length in bytes for an attribute value. Values may be empty.
-<a href=#167 id=167 data-nosnippet>167</a></span><span class="kw">pub const </span>CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH: usize = <span class="number">128</span>;
+<a href=#167 id=167 data-nosnippet>167</a></span><span class="kw">pub const </span>ATTRIBUTE_VALUE_MAX_LENGTH: usize = <span class="number">128</span>;
 <a href=#168 id=168 data-nosnippet>168</a>
 <a href=#169 id=169 data-nosnippet>169</a><span class="doccomment">/// Maximum number of entries allowed in the attributes map.
-<a href=#170 id=170 data-nosnippet>170</a></span><span class="kw">pub const </span>CLIENT_ATTRIBUTES_MAX_COUNT: usize = <span class="number">128</span>;
+<a href=#170 id=170 data-nosnippet>170</a></span><span class="kw">pub const </span>ATTRIBUTES_MAX_COUNT: usize = <span class="number">128</span>;
 <a href=#171 id=171 data-nosnippet>171</a>
 <a href=#172 id=172 data-nosnippet>172</a><span class="doccomment">/// Replace the arbitrary key-value attributes on the client endpoint cloud-side.
 <a href=#173 id=173 data-nosnippet>173</a></span><span class="attr">#[derive(Debug, derive_more::Display, Serialize, Deserialize)]
@@ -183,7 +183,7 @@
 <a href=#183 id=183 data-nosnippet>183</a>    <span class="kw">use </span>ed25519_dalek::SigningKey;
 <a href=#184 id=184 data-nosnippet>184</a>    <span class="kw">use </span>rcan::{Expires, Rcan};
 <a href=#185 id=185 data-nosnippet>185</a>
-<a href=#186 id=186 data-nosnippet>186</a>    <span class="kw">use </span>super::{Auth, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH, RemoteError, SetAttributes, SetGroup};
+<a href=#186 id=186 data-nosnippet>186</a>    <span class="kw">use </span>super::{ATTRIBUTE_VALUE_MAX_LENGTH, Auth, RemoteError, SetAttributes, SetGroup};
 <a href=#187 id=187 data-nosnippet>187</a>    <span class="kw">use </span><span class="kw">crate</span>::caps::{Caps, RelayCap};
 <a href=#188 id=188 data-nosnippet>188</a>
 <a href=#189 id=189 data-nosnippet>189</a>    <span class="attr">#[test]
@@ -252,8 +252,8 @@
 <a href=#252 id=252 data-nosnippet>252</a>        <span class="comment">// unicode key/value plus a value at exactly the documented max length
 <a href=#253 id=253 data-nosnippet>253</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>attributes = BTreeMap::new();
 <a href=#254 id=254 data-nosnippet>254</a>        attributes.insert(<span class="string">"région 🌍"</span>.to_string(), <span class="string">"us-wëst 🚀"</span>.to_string());
-<a href=#255 id=255 data-nosnippet>255</a>        <span class="kw">let </span>max_value = <span class="string">"x"</span>.repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
-<a href=#256 id=256 data-nosnippet>256</a>        <span class="macro">assert_eq!</span>(max_value.len(), CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+<a href=#255 id=255 data-nosnippet>255</a>        <span class="kw">let </span>max_value = <span class="string">"x"</span>.repeat(ATTRIBUTE_VALUE_MAX_LENGTH);
+<a href=#256 id=256 data-nosnippet>256</a>        <span class="macro">assert_eq!</span>(max_value.len(), ATTRIBUTE_VALUE_MAX_LENGTH);
 <a href=#257 id=257 data-nosnippet>257</a>        attributes.insert(<span class="string">"max"</span>.to_string(), max_value);
 <a href=#258 id=258 data-nosnippet>258</a>
 <a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">let </span>msg = SetAttributes { attributes };
