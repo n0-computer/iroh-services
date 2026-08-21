@@ -30,8 +30,9 @@ use crate::{
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
 };
 use iroh_services_proto::protocol::{
-    ALPN, Auth, GrantCap, IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong,
-    PutMetrics, PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
+    ALPN, Auth, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH, CLIENT_ATTRIBUTES_MAX_COUNT, GrantCap,
+    IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong, PutMetrics,
+    PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
 };
 
 /// Client is the main handle for interacting with iroh-services. It communicates with
@@ -363,11 +364,6 @@ fn validate_name(name: &str) -> Result<(), ValidateNameError> {
         Ok(())
     }
 }
-
-/// Maximum length in bytes for an attribute value. Values may be empty.
-pub const CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH: usize = 128;
-/// Maximum number of entries allowed in the attributes map.
-pub const CLIENT_ATTRIBUTES_MAX_COUNT: usize = 128;
 
 /// Error returned when an attributes map fails validation.
 #[derive(Debug, thiserror::Error)]

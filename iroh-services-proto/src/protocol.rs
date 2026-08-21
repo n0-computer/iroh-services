@@ -163,6 +163,12 @@ pub struct SetGroup {
     pub group: String,
 }
 
+/// Maximum length in bytes for an attribute value. Values may be empty.
+pub const CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH: usize = 128;
+
+/// Maximum number of entries allowed in the attributes map.
+pub const CLIENT_ATTRIBUTES_MAX_COUNT: usize = 128;
+
 /// Replace the arbitrary key-value attributes on the client endpoint cloud-side.
 #[derive(Debug, derive_more::Display, Serialize, Deserialize)]
 #[display("SetAttributes")]
@@ -177,7 +183,7 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use rcan::{Expires, Rcan};
 
-    use super::{Auth, RemoteError, SetAttributes, SetGroup};
+    use super::{Auth, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH, RemoteError, SetAttributes, SetGroup};
     use crate::caps::{Caps, RelayCap};
 
     #[test]
@@ -246,7 +252,6 @@ mod tests {
         // unicode key/value plus a value at exactly the documented max length
         let mut attributes = BTreeMap::new();
         attributes.insert("région 🌍".to_string(), "us-wëst 🚀".to_string());
-        const CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH: usize = 128;
         let max_value = "x".repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
         assert_eq!(max_value.len(), CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
         attributes.insert("max".to_string(), max_value);
