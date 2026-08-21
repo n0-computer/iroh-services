@@ -2,7 +2,7 @@
 <h2 id="versioning"><a class="doc-anchor" href="#versioning">§</a>Versioning</h2>
 <p>The wire protocol is append-only and does not bump this ALPN for additive
 changes. postcard encodes enum variants by index, so as long as new
-<a href="../iroh_services_proto/protocol/enum.IrohServicesProtocol.html" title="enum iroh_services_proto::protocol::IrohServicesProtocol"><code>IrohServicesProtocol</code></a> and <a href="../iroh_services_proto/protocol/enum.RemoteError.html" title="enum iroh_services_proto::protocol::RemoteError"><code>RemoteError</code></a> variants are only appended
+<a href="../iroh_services_proto/protocol/enum.IrohServicesProtocol.html" title="enum iroh_services_proto::protocol::IrohServicesProtocol"><code>IrohServicesProtocol</code></a> and <a href="enum.RemoteError.html" title="enum iroh_services::RemoteError"><code>RemoteError</code></a> variants are only appended
 (never inserted, reordered, or removed), older messages stay wire-compatible:</p>
 <ul>
 <li>An older client always works against a newer server: the server decodes
