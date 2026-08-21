@@ -54,9 +54,9 @@ This workspace contains two crates:
 
 - [`iroh-services`](iroh-services) is the client-facing crate.
   Applications should depend on this crate to connect to and interact with iroh-services.
-- [`iroh-services-proto`](iroh-services-proto) contains shared protocol and capability types used
-  to implement the iroh-services connection. It is only meant to help implement the iroh-serivces
-  backend.
+- [`iroh-services-proto`](iroh-services-proto) contains the shared API-secret, protocol, and
+  capability types used to implement the iroh-services connection. It is only meant to help
+  implement the iroh-serivces backend.
   Clients should depend on `iroh-services` rather than using this crate directly.
 
 ## License

@@ -34,7 +34,6 @@ mod client_host;
 mod openssh;
 mod token;
 
-pub mod api_secret;
 pub mod caps;
 pub mod net_diagnostics;
 mod preset;
@@ -58,11 +57,14 @@ pub static IROH_VERSION: std::sync::LazyLock<&str> = std::sync::LazyLock::new(||
 pub use anyhow;
 pub use client_host::ClientHost;
 pub use iroh_metrics::Registry;
-pub use iroh_services_proto::protocol::{ALPN, CLIENT_HOST_ALPN, RemoteError};
+pub use iroh_services_proto::{
+    api_secret,
+    api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
+    protocol::{ALPN, CLIENT_HOST_ALPN, RemoteError},
+};
 pub use token::ApiToken;
 
 pub use self::{
-    api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
     client::{
         BuildError, Client, ClientBuilder, Error, ValidateAttributesError, ValidateNameError,
     },
