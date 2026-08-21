@@ -11,6 +11,11 @@ use iroh::{
     endpoint::{ConnectError, Connection},
 };
 use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
+use iroh_services_proto::protocol::{
+    ALPN, Auth, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH, CLIENT_ATTRIBUTES_MAX_COUNT, GrantCap,
+    IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong, PutMetrics,
+    PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
+};
 use irpc::{Channels, RpcMessage, WithChannels, channel::none::NoReceiver};
 use irpc_iroh::IrohRemoteConnection;
 use n0_error::StackResultExt;
@@ -28,11 +33,6 @@ use crate::{
     api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
     caps::{Caps, DEFAULT_CAP_EXPIRY},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
-};
-use iroh_services_proto::protocol::{
-    ALPN, Auth, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH, CLIENT_ATTRIBUTES_MAX_COUNT, GrantCap,
-    IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong, PutMetrics,
-    PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
 };
 
 /// Client is the main handle for interacting with iroh-services. It communicates with
@@ -1040,6 +1040,7 @@ mod tests {
         Registry,
         encoding::{Decoder, Encoder},
     };
+    use iroh_services_proto::protocol::{IrohServicesProtocol, Pong, ServicesMessage};
     use irpc::WithChannels;
     use irpc_iroh::read_request;
     use n0_error::AnyError;
@@ -1060,7 +1061,6 @@ mod tests {
             ValidateNameError, is_connection_lost,
         },
     };
-    use iroh_services_proto::protocol::{IrohServicesProtocol, Pong, ServicesMessage};
 
     /// What the test server recorded about one PutMetrics request.
     #[derive(Debug)]

@@ -58,6 +58,7 @@ pub static IROH_VERSION: std::sync::LazyLock<&str> = std::sync::LazyLock::new(||
 pub use anyhow;
 pub use client_host::ClientHost;
 pub use iroh_metrics::Registry;
+pub use iroh_services_proto::protocol::{ALPN, CLIENT_HOST_ALPN, RemoteError};
 pub use token::ApiToken;
 
 pub use self::{
@@ -68,4 +69,3 @@ pub use self::{
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
     preset::{IrohServicesPreset, PresetBuilder, preset},
 };
-pub use iroh_services_proto::protocol::{ALPN, CLIENT_HOST_ALPN, RemoteError};
