@@ -12,9 +12,9 @@ use iroh::{
 };
 use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
 use iroh_services_proto::protocol::{
-    ALPN, Auth, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH, CLIENT_ATTRIBUTES_MAX_COUNT, GrantCap,
-    IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong, PutMetrics,
-    PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
+    ALPN, ATTRIBUTE_VALUE_MAX_LENGTH, ATTRIBUTES_MAX_COUNT, Auth, GrantCap, IrohServicesClient,
+    IrohServicesProtocol, NameEndpoint, Ping, Pong, PutMetrics, PutNetworkDiagnostics, RemoteError,
+    ServicesMessage, SetAttributes, SetGroup,
 };
 use irpc::{Channels, RpcMessage, WithChannels, channel::none::NoReceiver};
 use irpc_iroh::IrohRemoteConnection;
@@ -368,23 +368,21 @@ fn validate_name(name: &str) -> Result<(), ValidateNameError> {
 /// Error returned when an attributes map fails validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ValidateAttributesError {
-    #[error("Too many attributes (must be no more than {CLIENT_ATTRIBUTES_MAX_COUNT}).")]
+    #[error("Too many attributes (must be no more than {ATTRIBUTES_MAX_COUNT}).")]
     TooManyEntries,
     #[error("Invalid attribute key: {0}")]
     InvalidKey(#[from] ValidateNameError),
-    #[error(
-        "Attribute value too long (must be no more than {CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH} bytes)."
-    )]
+    #[error("Attribute value too long (must be no more than {ATTRIBUTE_VALUE_MAX_LENGTH} bytes).")]
     ValueTooLong,
 }
 
 fn validate_attributes(attrs: &BTreeMap<String, String>) -> Result<(), ValidateAttributesError> {
-    if attrs.len() > CLIENT_ATTRIBUTES_MAX_COUNT {
+    if attrs.len() > ATTRIBUTES_MAX_COUNT {
         return Err(ValidateAttributesError::TooManyEntries);
     }
     for (k, v) in attrs {
         validate_name(k)?;
-        if v.len() > CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH {
+        if v.len() > ATTRIBUTE_VALUE_MAX_LENGTH {
             return Err(ValidateAttributesError::ValueTooLong);
         }
     }
@@ -1056,9 +1054,9 @@ mod tests {
         api_secret::ApiSecret,
         caps::{Cap, Caps},
         client::{
-            API_SECRET_ENV_VAR_NAME, BuildError, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH,
-            CLIENT_ATTRIBUTES_MAX_COUNT, CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError,
-            ValidateNameError, is_connection_lost,
+            API_SECRET_ENV_VAR_NAME, ATTRIBUTE_VALUE_MAX_LENGTH, ATTRIBUTES_MAX_COUNT, BuildError,
+            CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError, ValidateNameError,
+            is_connection_lost,
         },
     };
 
@@ -1596,7 +1594,7 @@ mod tests {
         ));
 
         // more than 128 entries errors
-        let big: Vec<(String, String)> = (0..(CLIENT_ATTRIBUTES_MAX_COUNT + 1))
+        let big: Vec<(String, String)> = (0..(ATTRIBUTES_MAX_COUNT + 1))
             .map(|i| (format!("key_{i:04}"), format!("val_{i}")))
             .collect();
         let Err(err) = Client::builder(&endpoint).attributes(big) else {
@@ -1675,7 +1673,7 @@ mod tests {
         ));
 
         // value over the max length
-        let too_long_value = "x".repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH + 1);
+        let too_long_value = "x".repeat(ATTRIBUTE_VALUE_MAX_LENGTH + 1);
         let err = client
             .set_attributes([("ok", too_long_value.as_str())])
             .await
@@ -1686,7 +1684,7 @@ mod tests {
         ));
 
         // more entries than allowed
-        let big: Vec<(String, String)> = (0..(CLIENT_ATTRIBUTES_MAX_COUNT + 1))
+        let big: Vec<(String, String)> = (0..(ATTRIBUTES_MAX_COUNT + 1))
             .map(|i| (format!("key_{i:04}"), format!("val_{i}")))
             .collect();
         let err = client
@@ -1728,7 +1726,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_attribute_merge_over_limit_rejected() {
         // A client already holding the maximum number of attributes.
-        let full: Vec<(String, String)> = (0..CLIENT_ATTRIBUTES_MAX_COUNT)
+        let full: Vec<(String, String)> = (0..ATTRIBUTES_MAX_COUNT)
             .map(|i| (format!("key_{i:04}"), "v".to_string()))
             .collect();
 
@@ -1772,7 +1770,7 @@ mod tests {
         let client = build_serverless_client(4).await;
 
         // value of exactly the max length is accepted by validation
-        let max_value = "x".repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+        let max_value = "x".repeat(ATTRIBUTE_VALUE_MAX_LENGTH);
         let err = client
             .set_attributes([("ok".to_string(), max_value)])
             .await
@@ -1782,8 +1780,8 @@ mod tests {
             "expected a connect error (validation accepted), got {err:?}"
         );
 
-        // exactly CLIENT_ATTRIBUTES_MAX_COUNT entries is accepted by validation
-        let max_entries: Vec<(String, String)> = (0..CLIENT_ATTRIBUTES_MAX_COUNT)
+        // Exactly ATTRIBUTES_MAX_COUNT entries is accepted by validation.
+        let max_entries: Vec<(String, String)> = (0..ATTRIBUTES_MAX_COUNT)
             .map(|i| (format!("key_{i:04}"), format!("val_{i}")))
             .collect();
         let err = client
