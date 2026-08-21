@@ -5,9 +5,9 @@ use rcan::{Expires, Rcan};
 
 /// An opaque capability token issued by iroh-services.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CapabilityToken(Rcan<Caps>);
+pub struct ApiToken(Rcan<Caps>);
 
-impl CapabilityToken {
+impl ApiToken {
     pub(crate) fn new(token: Rcan<Caps>) -> Self {
         Self(token)
     }

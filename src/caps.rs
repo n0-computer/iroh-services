@@ -4,7 +4,7 @@ pub use iroh_services_proto::caps::{Cap, CapSet, Caps, MetricsCap, NetDiagnostic
 use n0_future::time::Duration;
 use rcan::{Expires, Rcan};
 
-use crate::CapabilityToken;
+use crate::ApiToken;
 
 pub(crate) const DEFAULT_CAP_EXPIRY: Duration = Duration::from_hours(24 * 30); // 1 month
 
@@ -16,13 +16,13 @@ pub fn create_api_token_from_openssh_pem(
     local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<CapabilityToken> {
+) -> Result<ApiToken> {
     let seed = crate::openssh::parse_ed25519_private_key(pem)?;
     let issuer = ed25519_dalek::SigningKey::from_bytes(&seed);
     let audience = local_id.as_verifying_key();
     let can =
         Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
-    Ok(CapabilityToken::new(can))
+    Ok(ApiToken::new(can))
 }
 
 /// Create an rcan token that grants capabilities to a remote endpoint.
@@ -33,12 +33,12 @@ pub fn create_grant_token(
     remote_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<CapabilityToken> {
+) -> Result<ApiToken> {
     let issuer = ed25519_dalek::SigningKey::from_bytes(&local_secret.to_bytes());
     let audience = remote_id.as_verifying_key();
     let can =
         Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
-    Ok(CapabilityToken::new(can))
+    Ok(ApiToken::new(can))
 }
 
 /// Create an rcan token for the api access from an iroh secret key
@@ -47,10 +47,10 @@ pub fn create_api_token_from_secret_key(
     local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<CapabilityToken> {
+) -> Result<ApiToken> {
     let issuer = ed25519_dalek::SigningKey::from_bytes(&private_key.to_bytes());
     let audience = local_id.as_verifying_key();
     let can =
         Rcan::issuing_builder(&issuer, audience, capability).sign(Expires::valid_for(max_age));
-    Ok(CapabilityToken::new(can))
+    Ok(ApiToken::new(can))
 }

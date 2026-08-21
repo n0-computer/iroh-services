@@ -58,7 +58,7 @@ pub static IROH_VERSION: std::sync::LazyLock<&str> = std::sync::LazyLock::new(||
 pub use anyhow;
 pub use client_host::ClientHost;
 pub use iroh_metrics::Registry;
-pub use token::CapabilityToken;
+pub use token::ApiToken;
 
 pub use self::{
     api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
