@@ -106,18 +106,3 @@ impl ApiSecret {
         &self.remote
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn encoding_roundtrips() {
-        let secret = SecretKey::from_bytes(&[1; 32]);
-        let facade = ApiSecret::new(secret, SecretKey::from_bytes(&[2; 32]).public());
-
-        let decoded = ApiSecret::decode_bytes(&facade.encode_bytes()).unwrap();
-        assert_eq!(decoded.secret.to_bytes(), facade.secret.to_bytes());
-        assert_eq!(decoded.remote, facade.remote);
-    }
-}

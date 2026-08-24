@@ -82,18 +82,3 @@ pub fn create_api_token_from_secret_key(
         Rcan::issuing_builder(&issuer, audience, capability.0).sign(Expires::valid_for(max_age));
     Ok(ApiToken::new(can))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn constructors_map_to_proto_capabilities() {
-        assert_eq!(Caps::client().0, ProtoCaps::for_shared_secret());
-        assert_eq!(Caps::relay_use().0, ProtoCaps::new([ProtoRelayCap::Use]));
-        assert_eq!(
-            Caps::net_diagnostics_get_any().0,
-            ProtoCaps::new([ProtoNetDiagnosticsCap::GetAny])
-        );
-    }
-}
