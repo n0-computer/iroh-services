@@ -1,6 +1,7 @@
 use std::{collections::BTreeSet, fmt, str::FromStr};
 
 use anyhow::{Context, Result, bail};
+use rcan::Capability;
 use serde::{Deserialize, Serialize};
 
 macro_rules! cap_enum(
@@ -150,8 +151,10 @@ impl Caps {
         let Self::V0(set) = self;
         set.to_strings()
     }
+}
 
-    pub fn permits(&self, other: &Self) -> bool {
+impl Capability for Caps {
+    fn permits(&self, other: &Self) -> bool {
         let Self::V0(slf) = self;
         let Self::V0(other) = other;
         slf.permits(other)
@@ -164,8 +167,8 @@ impl From<Cap> for Caps {
     }
 }
 
-impl Cap {
-    pub fn permits(&self, other: &Self) -> bool {
+impl Capability for Cap {
+    fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (Cap::All, _) => true,
             (Cap::Client, other) => client_capabilities(other),
@@ -188,24 +191,24 @@ fn client_capabilities(other: &Cap) -> bool {
     }
 }
 
-impl MetricsCap {
-    pub fn permits(&self, other: &Self) -> bool {
+impl Capability for MetricsCap {
+    fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (MetricsCap::PutAny, MetricsCap::PutAny) => true,
         }
     }
 }
 
-impl RelayCap {
-    pub fn permits(&self, other: &Self) -> bool {
+impl Capability for RelayCap {
+    fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (RelayCap::Use, RelayCap::Use) => true,
         }
     }
 }
 
-impl NetDiagnosticsCap {
-    pub fn permits(&self, other: &Self) -> bool {
+impl Capability for NetDiagnosticsCap {
+    fn permits(&self, other: &Self) -> bool {
         match (self, other) {
             (NetDiagnosticsCap::PutAny, NetDiagnosticsCap::PutAny) => true,
             (NetDiagnosticsCap::GetAny, NetDiagnosticsCap::GetAny) => true,
@@ -216,15 +219,15 @@ impl NetDiagnosticsCap {
 
 /// A set of capabilities
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Clone, Serialize, Deserialize)]
-pub struct CapSet<C: Ord>(BTreeSet<C>);
+pub struct CapSet<C: Capability + Ord>(BTreeSet<C>);
 
-impl<C: Ord> Default for CapSet<C> {
+impl<C: Capability + Ord> Default for CapSet<C> {
     fn default() -> Self {
         Self(BTreeSet::new())
     }
 }
 
-impl<C: Ord> CapSet<C> {
+impl<C: Capability + Ord> CapSet<C> {
     pub fn new(set: impl IntoIterator<Item = impl Into<C>>) -> Self {
         Self(BTreeSet::from_iter(set.into_iter().map(Into::into)))
     }
@@ -275,8 +278,8 @@ impl<C: Ord> CapSet<C> {
     }
 }
 
-impl CapSet<Cap> {
-    pub fn permits(&self, other: &Self) -> bool {
+impl<C: Capability + Ord> Capability for CapSet<C> {
+    fn permits(&self, other: &Self) -> bool {
         other
             .iter()
             .all(|other_cap| self.iter().any(|self_cap| self_cap.permits(other_cap)))

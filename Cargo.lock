@@ -1756,7 +1756,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "derive_more",
- "ed25519-dalek",
  "iroh",
  "iroh-metrics",
  "irpc",

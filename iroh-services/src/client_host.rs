@@ -11,7 +11,7 @@ use iroh_services_proto::{
 use irpc::WithChannels;
 use irpc_iroh::read_request;
 use n0_error::AnyError;
-use rcan::{CapabilityOrigin, Rcan};
+use rcan::{Capability, CapabilityOrigin, Rcan};
 use tracing::{debug, warn};
 
 /// Protocol handler for cloud-to-endpoint connections.

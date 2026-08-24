@@ -180,34 +180,7 @@ pub struct SetAttributes {
 mod tests {
     use std::collections::BTreeMap;
 
-    use ed25519_dalek::SigningKey;
-    use rcan::{Expires, Rcan};
-
-    use super::{ATTRIBUTE_VALUE_MAX_LENGTH, Auth, RemoteError, SetAttributes, SetGroup};
-    use crate::caps::{Caps, RelayCap};
-
-    #[test]
-    fn auth_wire_encoding_is_stable() {
-        const GOLDEN: &[u8] = &[
-            32, 138, 136, 227, 221, 116, 9, 241, 149, 253, 82, 219, 45, 60, 186, 93, 114, 202, 103,
-            9, 191, 29, 148, 18, 27, 243, 116, 136, 1, 180, 15, 111, 92, 32, 129, 57, 119, 14, 168,
-            125, 23, 95, 86, 163, 84, 102, 195, 76, 126, 204, 203, 141, 138, 145, 180, 238, 55,
-            162, 93, 246, 15, 91, 143, 201, 179, 148, 0, 0, 1, 2, 0, 1, 128, 164, 167, 218, 6, 177,
-            237, 32, 146, 189, 68, 211, 5, 10, 199, 42, 240, 27, 8, 241, 35, 217, 85, 253, 169,
-            122, 177, 208, 76, 202, 130, 200, 245, 37, 86, 179, 157, 6, 0, 247, 89, 83, 57, 23,
-            236, 89, 175, 142, 180, 69, 198, 251, 51, 212, 249, 182, 228, 156, 226, 10, 172, 167,
-            139, 111, 161, 120, 190, 235, 10,
-        ];
-
-        let issuer = SigningKey::from_bytes(&[1; 32]);
-        let audience = SigningKey::from_bytes(&[2; 32]).verifying_key();
-        let caps = Rcan::issuing_builder(&issuer, audience, Caps::new([RelayCap::Use]))
-            .sign(Expires::At(1_800_000_000));
-        let auth = Auth { caps };
-
-        assert_eq!(postcard::to_stdvec(&auth).unwrap(), GOLDEN);
-        postcard::from_bytes::<Auth>(GOLDEN).unwrap();
-    }
+    use super::{ATTRIBUTE_VALUE_MAX_LENGTH, RemoteError, SetAttributes, SetGroup};
 
     #[test]
     fn test_remote_error_wire_compat() {

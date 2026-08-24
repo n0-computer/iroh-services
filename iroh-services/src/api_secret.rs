@@ -1,4 +1,9 @@
-use std::{collections::BTreeSet, env::VarError, fmt, str::FromStr};
+use std::{
+    collections::BTreeSet,
+    env::VarError,
+    fmt::{self, Display},
+    str::FromStr,
+};
 
 use anyhow::{Context, anyhow};
 use iroh::{EndpointAddr, EndpointId, SecretKey, TransportAddr};
@@ -12,13 +17,13 @@ pub const API_SECRET_ENV_VAR_NAME: &str = "IROH_SERVICES_API_SECRET";
 /// value of these should be treated like any other API key: guard them carefully.
 #[derive(Debug, Clone)]
 pub struct ApiSecret {
-    /// ED25519 secret used to construct rcans from.
+    /// ED25519 secret used to construct rcans from
     pub secret: SecretKey,
-    /// The iroh-services endpoint to direct requests to.
+    /// The iroh-services endpoint to direct requests to
     pub remote: EndpointAddr,
 }
 
-impl fmt::Display for ApiSecret {
+impl Display for ApiSecret {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.encode_string())
     }
@@ -43,6 +48,8 @@ struct Variant0ServicesTicket {
 }
 
 impl Ticket for ApiSecret {
+    // KIND is the constant that's added to the front of a serialized ticket
+    // string. It should be a short, human readable string
     const KIND: &'static str = "services";
 
     fn encode_bytes(&self) -> Vec<u8> {
@@ -57,13 +64,13 @@ impl Ticket for ApiSecret {
     }
 
     fn decode_bytes(bytes: &[u8]) -> Result<Self, ParseError> {
-        let TicketWireFormat::Variant0(Variant0ServicesTicket { secret, addr }) =
-            postcard::from_bytes(bytes)?;
+        let res: TicketWireFormat = postcard::from_bytes(bytes)?;
+        let TicketWireFormat::Variant0(Variant0ServicesTicket { secret, addr }) = res;
         Ok(Self {
             secret,
             remote: EndpointAddr {
                 id: addr.endpoint_id,
-                addrs: addr.addrs,
+                addrs: addr.addrs.clone(),
             },
         })
     }
@@ -78,7 +85,7 @@ impl FromStr for ApiSecret {
 }
 
 impl ApiSecret {
-    /// Creates a new API secret.
+    /// Creates a new ticket.
     pub fn new(secret: SecretKey, remote: impl Into<EndpointAddr>) -> Self {
         Self {
             secret,
@@ -86,7 +93,7 @@ impl ApiSecret {
         }
     }
 
-    /// Reads an API secret from the given environment variable.
+    /// Read an Api Secret from a given environment variable
     pub fn from_env_var(env_var: &str) -> anyhow::Result<Self> {
         match std::env::var(env_var) {
             Ok(ticket_string) if ticket_string.is_empty() => {
@@ -95,13 +102,14 @@ impl ApiSecret {
             Ok(ticket_string) => Self::from_str(&ticket_string)
                 .context(format!("invalid api secret at env var {env_var}")),
             Err(VarError::NotPresent) => Err(anyhow!("{env_var} environment variable is not set")),
-            Err(VarError::NotUnicode(err)) => Err(anyhow!(
-                "{env_var} environment variable is not valid unicode: {err:?}"
+            Err(VarError::NotUnicode(e)) => Err(anyhow!(
+                "{env_var} environment variable is not valid unicode: {:?}",
+                e
             )),
         }
     }
 
-    /// Returns the [`EndpointAddr`] of the provider for this ticket.
+    /// The [`EndpointAddr`] of the provider for this ticket.
     pub fn addr(&self) -> &EndpointAddr {
         &self.remote
     }

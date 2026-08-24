@@ -4,8 +4,7 @@
 //! covering UDP connectivity, relay latency, and port mapping protocol
 //! availability.
 //!
-//! Relay latencies and UDP connectivity are read from iroh's
-//! [`NetReport`]
+//! Relay latencies and UDP connectivity are read from iroh's [`NetReport`]
 //! which the endpoint already produces continuously. The only additional probe
 //! performed here is the port-mapping protocol availability check.
 use std::net::SocketAddr;
@@ -13,7 +12,6 @@ use std::net::SocketAddr;
 use iroh::unstable_net_report::NetReport;
 use serde::{Deserialize, Serialize};
 
-/// A network diagnostics report for an iroh endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticsReport {
     pub endpoint_id: iroh::EndpointId,
@@ -58,6 +56,8 @@ impl PortMapProbe {
 }
 
 pub mod checks {
+    use std::net::SocketAddr;
+
     use anyhow::Result;
     use iroh::{Endpoint, Watcher};
     use n0_future::time::Duration;
