@@ -30,7 +30,7 @@
 <a href=#30 id=30 data-nosnippet>30</a><span class="kw">use </span>crate::{
 <a href=#31 id=31 data-nosnippet>31</a>    ClientBuilder,
 <a href=#32 id=32 data-nosnippet>32</a>    api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
-<a href=#33 id=33 data-nosnippet>33</a>    caps::{Cap, Caps, DEFAULT_CAP_EXPIRY},
+<a href=#33 id=33 data-nosnippet>33</a>    caps::{Caps, DEFAULT_CAP_EXPIRY},
 <a href=#34 id=34 data-nosnippet>34</a>};
 <a href=#35 id=35 data-nosnippet>35</a>
 <a href=#36 id=36 data-nosnippet>36</a><span class="doccomment">/// An iroh endpoint preset configured for iroh-services. Build one with
@@ -203,7 +203,7 @@
 <a href=#203 id=203 data-nosnippet>203</a>            api_secret.secret.clone(),
 <a href=#204 id=204 data-nosnippet>204</a>            secret_key.public(),
 <a href=#205 id=205 data-nosnippet>205</a>            <span class="self">self</span>.cap_expiry,
-<a href=#206 id=206 data-nosnippet>206</a>            Caps::new([Cap::Relay(<span class="kw">crate</span>::caps::RelayCap::Use)]),
+<a href=#206 id=206 data-nosnippet>206</a>            Caps::relay_use(),
 <a href=#207 id=207 data-nosnippet>207</a>        )<span class="question-mark">?</span>;
 <a href=#208 id=208 data-nosnippet>208</a>
 <a href=#209 id=209 data-nosnippet>209</a>        <span class="kw">let </span><span class="kw-2">mut </span>token = data_encoding::BASE32_NOPAD.encode(<span class="kw-2">&amp;</span>rcan.encode());

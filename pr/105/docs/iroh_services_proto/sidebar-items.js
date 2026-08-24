@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["api_secret","caps","net_diagnostics","protocol"]};
+window.SIDEBAR_ITEMS = {"mod":["caps","net_diagnostics","protocol"]};
