@@ -4,14 +4,15 @@ use iroh::{
     endpoint::Connection,
     protocol::{AcceptError, ProtocolHandler},
 };
-use iroh_services_proto::protocol::{ClientHostProtocol, NetDiagnosticsMessage, RemoteError};
+use iroh_services_proto::{
+    caps::{Caps, NetDiagnosticsCap},
+    protocol::{ClientHostProtocol, NetDiagnosticsMessage, RemoteError},
+};
 use irpc::WithChannels;
 use irpc_iroh::read_request;
 use n0_error::AnyError;
 use rcan::{CapabilityOrigin, Rcan};
 use tracing::{debug, warn};
-
-use crate::caps::{Caps, NetDiagnosticsCap};
 
 /// Protocol handler for cloud-to-endpoint connections.
 #[derive(Debug)]
@@ -78,7 +79,7 @@ impl ClientHost {
 
                 let report =
                     crate::net_diagnostics::checks::run_diagnostics(&self.endpoint).await?;
-                tx.send(Ok(report))
+                tx.send(Ok(report.into_proto()))
                     .await
                     .inspect_err(|e| warn!("sending network diagnostics response: {:?}", e))?;
             }
@@ -160,7 +161,7 @@ mod tests {
             server_ep.secret_key().clone(),
             client_ep.id(),
             Duration::from_secs(3600),
-            Caps::for_shared_secret(),
+            crate::caps::Caps::for_shared_secret(),
         )
         .unwrap()
         .into_rcan();
@@ -210,7 +211,7 @@ mod tests {
             client_ep.secret_key().clone(),
             client_ep.id(),
             Duration::from_secs(3600),
-            Caps::for_shared_secret(),
+            crate::caps::Caps::for_shared_secret(),
         )
         .unwrap()
         .into_rcan();

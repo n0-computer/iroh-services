@@ -1,6 +1,5 @@
-//! Shared API-secret, capability, and wire-protocol types for iroh-services clients and servers.
+//! Raw wire types shared by iroh-services client internals and server implementations.
 
-pub mod api_secret;
 pub mod caps;
 pub mod net_diagnostics;
 pub mod protocol;

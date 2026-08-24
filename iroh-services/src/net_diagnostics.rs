@@ -5,14 +5,59 @@
 //! availability.
 //!
 //! Relay latencies and UDP connectivity are read from iroh's
-//! [`NetReport`](iroh::unstable_net_report::NetReport)
+//! [`NetReport`]
 //! which the endpoint already produces continuously. The only additional probe
 //! performed here is the port-mapping protocol availability check.
-pub use iroh_services_proto::net_diagnostics::{DiagnosticsReport, PortMapProbe};
+use std::net::SocketAddr;
+
+use iroh::unstable_net_report::NetReport;
+use serde::{Deserialize, Serialize};
+
+/// A network diagnostics report for an iroh endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosticsReport {
+    pub endpoint_id: iroh::EndpointId,
+    pub net_report: Option<NetReport>,
+    pub direct_addrs: Vec<SocketAddr>,
+    pub portmap_probe: Option<PortMapProbe>,
+    #[serde(default)]
+    pub iroh_version: String,
+    #[serde(default)]
+    pub iroh_services_version: String,
+}
+
+impl DiagnosticsReport {
+    pub(crate) fn into_proto(self) -> iroh_services_proto::net_diagnostics::DiagnosticsReport {
+        iroh_services_proto::net_diagnostics::DiagnosticsReport {
+            endpoint_id: self.endpoint_id,
+            net_report: self.net_report,
+            direct_addrs: self.direct_addrs,
+            portmap_probe: self.portmap_probe.map(PortMapProbe::into_proto),
+            iroh_version: self.iroh_version,
+            iroh_services_version: self.iroh_services_version,
+        }
+    }
+}
+
+/// Port mapping protocol availability on the LAN.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortMapProbe {
+    pub upnp: bool,
+    pub pcp: bool,
+    pub nat_pmp: bool,
+}
+
+impl PortMapProbe {
+    fn into_proto(self) -> iroh_services_proto::net_diagnostics::PortMapProbe {
+        iroh_services_proto::net_diagnostics::PortMapProbe {
+            upnp: self.upnp,
+            pcp: self.pcp,
+            nat_pmp: self.nat_pmp,
+        }
+    }
+}
 
 pub mod checks {
-    use std::net::SocketAddr;
-
     use anyhow::Result;
     use iroh::{Endpoint, Watcher};
     use n0_future::time::Duration;

@@ -2,7 +2,7 @@
 name = "iroh-services-proto"
 version = "0.1.0"
 edition = "2024"
-description = "Shared protocol types for iroh-services"
+description = "Raw wire types for iroh-services protocol implementations"
 license = "MIT OR Apache-2.0"
 authors = ["n0 team"]
 repository = "https://github.com/n0-computer/iroh-services"
@@ -14,8 +14,6 @@ derive_more = { version = "2.0.1", features = ["display", "from"] }
 irpc = { version = "0.17", default-features = false, features = ["derive", "rpc", "stream", "spans"] }
 iroh = { version = "1.0.0", default-features = false, features = ["unstable-net-report"] }
 iroh-metrics = { version = "1.0.0", default-features = false }
-iroh-tickets = "1.0.0"
-postcard = { version = "1.1.3", features = ["use-std"] }
 rcan = "0.4"
 serde = { version = "1.0.217", features = ["derive"] }
 strum = { version = "0.28", features = ["derive"] }
@@ -25,3 +23,4 @@ uuid = { version = "1.17", features = ["serde"] }
 
 [dev-dependencies]
 ed25519-dalek = "=3.0.0-rc.0"
+postcard = { version = "1.1.3", features = ["use-std"] }

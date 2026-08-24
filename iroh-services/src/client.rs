@@ -11,10 +11,14 @@ use iroh::{
     endpoint::{ConnectError, Connection},
 };
 use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
-use iroh_services_proto::protocol::{
-    ALPN, ATTRIBUTE_VALUE_MAX_LENGTH, ATTRIBUTES_MAX_COUNT, Auth, GrantCap, IrohServicesClient,
-    IrohServicesProtocol, NameEndpoint, Ping, Pong, PutMetrics, PutNetworkDiagnostics, RemoteError,
-    ServicesMessage, SetAttributes, SetGroup,
+use iroh_services_proto::{
+    caps::Caps as ProtoCaps,
+    protocol::{
+        ATTRIBUTE_VALUE_MAX_LENGTH, ATTRIBUTES_MAX_COUNT, Auth, GrantCap, IrohServicesClient,
+        IrohServicesProtocol, NameEndpoint, Ping, Pong as ProtoPong, PutMetrics,
+        PutNetworkDiagnostics, RemoteError as ProtoRemoteError, ServicesMessage, SetAttributes,
+        SetGroup,
+    },
 };
 use irpc::{Channels, RpcMessage, WithChannels, channel::none::NoReceiver};
 use irpc_iroh::IrohRemoteConnection;
@@ -24,12 +28,14 @@ use n0_future::{
     time::{self, Duration},
 };
 use rcan::Rcan;
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 use crate::{
+    ALPN,
     api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
     caps::{Caps, DEFAULT_CAP_EXPIRY},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
@@ -72,7 +78,7 @@ pub struct Client {
 /// created with [`Client::builder`]
 pub struct ClientBuilder {
     cap_expiry: Duration,
-    cap: Option<Rcan<Caps>>,
+    cap: Option<Rcan<ProtoCaps>>,
     endpoint: Endpoint,
     name: Option<String>,
     group: Option<String>,
@@ -80,6 +86,43 @@ pub struct ClientBuilder {
     metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
+}
+
+/// A response to [`Client::ping`].
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Pong {
+    pub req_id: [u8; 16],
+}
+
+/// An error returned by the remote iroh-services endpoint.
+#[derive(Clone, Serialize, Deserialize, thiserror::Error, Debug)]
+#[non_exhaustive]
+pub enum RemoteError {
+    #[error("Missing capability: {}", _0.to_strings().join(", "))]
+    MissingCapability(Caps),
+    #[error("Unauthorized: {0}")]
+    AuthError(String),
+    #[error("Internal server error")]
+    InternalServerError,
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+    #[error("Rate limit exceeded")]
+    RateLimited,
+}
+
+impl RemoteError {
+    fn from_proto(error: ProtoRemoteError) -> Self {
+        match error {
+            ProtoRemoteError::MissingCapability(caps) => {
+                Self::MissingCapability(Caps::from_proto(caps))
+            }
+            ProtoRemoteError::AuthError(error) => Self::AuthError(error),
+            ProtoRemoteError::InternalServerError => Self::InternalServerError,
+            ProtoRemoteError::InvalidInput(error) => Self::InvalidInput(error),
+            ProtoRemoteError::RateLimited => Self::RateLimited,
+            _ => Self::InternalServerError,
+        }
+    }
 }
 
 impl ClientBuilder {
@@ -628,7 +671,7 @@ enum ClientActorMessage {
     },
     GrantCap {
         // boxed to avoid large enum variants
-        cap: Box<Rcan<Caps>>,
+        cap: Box<Rcan<ProtoCaps>>,
         done: oneshot::Sender<Result<(), Error>>,
     },
     PutNetworkDiagnostics {
@@ -697,7 +740,7 @@ impl RpcClient {
     async fn connect(
         endpoint: &Endpoint,
         remote: EndpointAddr,
-        caps: Rcan<Caps>,
+        caps: Rcan<ProtoCaps>,
     ) -> Result<Self, Error> {
         trace!("client connecting and authorizing");
         let connection = endpoint
@@ -708,13 +751,13 @@ impl RpcClient {
         irpc.rpc(Auth { caps })
             .await
             .inspect_err(|err| debug!("authorization failed: {err:?}"))
-            .map_err(|err| RemoteError::AuthError(err.to_string()))?;
+            .map_err(|err| Error::Remote(RemoteError::AuthError(err.to_string())))?;
         Ok(Self { connection, irpc })
     }
 }
 
 struct ClientActor {
-    capabilities: Rcan<Caps>,
+    capabilities: Rcan<ProtoCaps>,
     endpoint: Endpoint,
     remote: EndpointAddr,
     /// The active authenticated connection, established on demand.
@@ -963,11 +1006,16 @@ impl ClientActor {
 
     async fn send_ping(&mut self) -> Result<Pong, Error> {
         let req = rand::random();
-        self.rpc(Ping { req_id: req }).await
+        let pong: ProtoPong = self.rpc(Ping { req_id: req }).await?;
+        Ok(Pong {
+            req_id: pong.req_id,
+        })
     }
 
     async fn send_name_endpoint(&mut self, name: String) -> Result<(), Error> {
-        self.rpc(NameEndpoint { name: name.clone() }).await??;
+        self.rpc(NameEndpoint { name: name.clone() })
+            .await?
+            .map_err(RemoteError::from_proto)?;
         self.name = Some(name);
         Ok(())
     }
@@ -976,7 +1024,8 @@ impl ClientActor {
         self.rpc(SetGroup {
             group: group.clone(),
         })
-        .await??;
+        .await?
+        .map_err(RemoteError::from_proto)?;
         self.group = Some(group);
         Ok(())
     }
@@ -988,7 +1037,8 @@ impl ClientActor {
         self.rpc(SetAttributes {
             attributes: attributes.clone(),
         })
-        .await??;
+        .await?
+        .map_err(RemoteError::from_proto)?;
         self.attributes = attributes;
         Ok(())
     }
@@ -1004,17 +1054,23 @@ impl ClientActor {
             session_id: self.session_id,
             update,
         };
-        self.rpc(req).await??;
+        self.rpc(req).await?.map_err(RemoteError::from_proto)?;
         Ok(())
     }
 
-    async fn grant_cap(&mut self, cap: Rcan<Caps>) -> Result<(), Error> {
-        self.rpc(GrantCap { cap }).await??;
+    async fn grant_cap(&mut self, cap: Rcan<ProtoCaps>) -> Result<(), Error> {
+        self.rpc(GrantCap { cap })
+            .await?
+            .map_err(RemoteError::from_proto)?;
         Ok(())
     }
 
     async fn put_network_diagnostics(&mut self, report: DiagnosticsReport) -> Result<(), Error> {
-        self.rpc(PutNetworkDiagnostics { report }).await??;
+        self.rpc(PutNetworkDiagnostics {
+            report: report.into_proto(),
+        })
+        .await?
+        .map_err(RemoteError::from_proto)?;
         Ok(())
     }
 }
@@ -1314,7 +1370,7 @@ mod tests {
         // Compare capability fields individually to avoid flaky timestamp
         // mismatches between the builder's rcan and a freshly-created one.
         let cap = builder.cap.as_ref().expect("expected capability to be set");
-        assert_eq!(cap.capability(), &Caps::new([Cap::Client]));
+        assert_eq!(cap.capability(), &Caps::new([Cap::Client]).into_proto());
         assert_eq!(cap.audience(), &endpoint.id().as_verifying_key());
         assert_eq!(cap.issuer(), &shared_secret.public().as_verifying_key());
     }
