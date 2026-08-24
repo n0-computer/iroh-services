@@ -3,7 +3,7 @@ use std::str::FromStr;
 use iroh::{Endpoint, RelayMode, address_lookup::PkarrResolver, protocol::Router};
 #[cfg(not(wasm_browser))]
 use iroh_services::API_SECRET_ENV_VAR_NAME;
-use iroh_services::{ApiSecret, Client, caps::NetDiagnosticsCap, preset};
+use iroh_services::{ApiSecret, Client, caps::Caps, preset};
 use n0_error::{Result, StdResultExt};
 #[cfg(not(wasm_browser))]
 use tokio::test;
@@ -46,7 +46,7 @@ async fn main_integration_test() -> Result {
         .std_context("failed building iroh-services client")?;
 
     services
-        .grant_capability(secret.addr().id, vec![NetDiagnosticsCap::GetAny])
+        .grant_capability(secret.addr().id, Caps::net_diagnostics_get_any())
         .await
         .std_context("failed granting net diagnostics capability")?;
 

@@ -33,7 +33,7 @@ and [docs.rs](https://docs.rs/iroh-services) for the full API.
 ### Network diagnostics
 
 To let iroh-services fetch a connectivity report from an endpoint on demand,
-grant it the `NetDiagnosticsCap::GetAny` capability and accept
+grant it `Caps::net_diagnostics_get_any()` and accept
 `CLIENT_HOST_ALPN` on your router so it can dial back:
 
 ```rust

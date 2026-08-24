@@ -98,7 +98,7 @@ pub struct Pong {
 #[derive(Clone, Serialize, Deserialize, thiserror::Error, Debug)]
 #[non_exhaustive]
 pub enum RemoteError {
-    #[error("Missing capability: {}", _0.to_strings().join(", "))]
+    #[error("Missing capability: {}", _0.0.to_strings().join(", "))]
     MissingCapability(Caps),
     #[error("Unauthorized: {0}")]
     AuthError(String),
@@ -113,9 +113,7 @@ pub enum RemoteError {
 impl RemoteError {
     fn from_proto(error: ProtoRemoteError) -> Self {
         match error {
-            ProtoRemoteError::MissingCapability(caps) => {
-                Self::MissingCapability(Caps::from_proto(caps))
-            }
+            ProtoRemoteError::MissingCapability(caps) => Self::MissingCapability(Caps(caps)),
             ProtoRemoteError::AuthError(error) => Self::AuthError(error),
             ProtoRemoteError::InternalServerError => Self::InternalServerError,
             ProtoRemoteError::InvalidInput(error) => Self::InvalidInput(error),
@@ -254,7 +252,7 @@ impl ClientBuilder {
             ticket.secret,
             local_id,
             self.cap_expiry,
-            Caps::for_shared_secret(),
+            Caps::client(),
         )?;
 
         self.remote = Some(ticket.remote);
@@ -279,7 +277,7 @@ impl ClientBuilder {
             pem,
             local_id,
             self.cap_expiry,
-            Caps::all(),
+            Caps(ProtoCaps::all()),
         )?;
         self.cap.replace(token.into_rcan());
 
@@ -620,16 +618,12 @@ impl Client {
     /// Grant capabilities to a remote endpoint. Creates a signed RCAN token
     /// and sends it to iroh-services for storage. The remote can then use this token
     /// when dialing back to authorize its requests.
-    pub async fn grant_capability(
-        &self,
-        remote_id: EndpointId,
-        caps: impl IntoIterator<Item = impl Into<crate::caps::Cap>>,
-    ) -> Result<(), Error> {
+    pub async fn grant_capability(&self, remote_id: EndpointId, caps: Caps) -> Result<(), Error> {
         let cap = crate::caps::create_grant_token(
             self.endpoint.secret_key().clone(),
             remote_id,
             DEFAULT_CAP_EXPIRY,
-            Caps::new(caps),
+            caps,
         )
         .map_err(Error::Other)?
         .into_rcan();
@@ -1108,7 +1102,7 @@ mod tests {
     use crate::{
         Client, ClientBuilder,
         api_secret::ApiSecret,
-        caps::{Cap, Caps},
+        caps::Caps,
         client::{
             API_SECRET_ENV_VAR_NAME, ATTRIBUTE_VALUE_MAX_LENGTH, ATTRIBUTES_MAX_COUNT, BuildError,
             CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError, ValidateNameError,
@@ -1370,7 +1364,7 @@ mod tests {
         // Compare capability fields individually to avoid flaky timestamp
         // mismatches between the builder's rcan and a freshly-created one.
         let cap = builder.cap.as_ref().expect("expected capability to be set");
-        assert_eq!(cap.capability(), &Caps::new([Cap::Client]).into_proto());
+        assert_eq!(cap.capability(), &Caps::client().0);
         assert_eq!(cap.audience(), &endpoint.id().as_verifying_key());
         assert_eq!(cap.issuer(), &shared_secret.public().as_verifying_key());
     }

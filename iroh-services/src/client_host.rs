@@ -161,7 +161,7 @@ mod tests {
             server_ep.secret_key().clone(),
             client_ep.id(),
             Duration::from_secs(3600),
-            crate::caps::Caps::for_shared_secret(),
+            crate::caps::Caps::client(),
         )
         .unwrap()
         .into_rcan();
@@ -211,7 +211,7 @@ mod tests {
             client_ep.secret_key().clone(),
             client_ep.id(),
             Duration::from_secs(3600),
-            crate::caps::Caps::for_shared_secret(),
+            crate::caps::Caps::client(),
         )
         .unwrap()
         .into_rcan();
