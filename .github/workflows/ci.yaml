@@ -68,7 +68,7 @@ jobs:
           docker kill $(docker ps -q)
 
         # See https://github.com/cross-rs/cross/issues/1222
-      - uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
         with:
           tool: cross
 
@@ -161,7 +161,7 @@ jobs:
           docker kill $(docker ps -q)
 
         # See https://github.com/cross-rs/cross/issues/1222
-      - uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
         with:
           tool: cross
 
@@ -219,7 +219,7 @@ jobs:
           toolchain: stable
           components: rustfmt
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-      - uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+      - uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2.86.3
         with:
           tool: cargo-make
       - run: cargo make format-check
