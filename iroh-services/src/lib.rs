@@ -61,10 +61,10 @@ pub use iroh_metrics::Registry;
 pub use token::ApiToken;
 
 /// The main ALPN for connecting from the client to the cloud node.
-pub const ALPN: &[u8] = iroh_services_proto::protocol::ALPN;
+pub const ALPN: &[u8] = iroh_services_proto::ALPN;
 
 /// The ALPN for cloud-to-endpoint network diagnostics connections.
-pub const CLIENT_HOST_ALPN: &[u8] = iroh_services_proto::protocol::CLIENT_HOST_ALPN;
+pub const CLIENT_HOST_ALPN: &[u8] = iroh_services_proto::CLIENT_HOST_ALPN;
 
 pub use self::{
     api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},

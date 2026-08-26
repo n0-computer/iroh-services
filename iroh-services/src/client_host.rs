@@ -5,8 +5,8 @@ use iroh::{
     protocol::{AcceptError, ProtocolHandler},
 };
 use iroh_services_proto::{
+    ClientHostProtocol, NetDiagnosticsMessage, RemoteError,
     caps::{Caps, NetDiagnosticsCap},
-    protocol::{ClientHostProtocol, NetDiagnosticsMessage, RemoteError},
 };
 use irpc::WithChannels;
 use irpc_iroh::read_request;
@@ -128,9 +128,7 @@ async fn send_missing_caps<T>(
 #[cfg(test)]
 mod tests {
     use iroh::{address_lookup::MemoryLookup, endpoint::presets, protocol::Router};
-    use iroh_services_proto::protocol::{
-        Auth, ClientHostClient, IrohServicesClient, RunNetworkDiagnostics,
-    };
+    use iroh_services_proto::{Auth, ClientHostClient, IrohServicesClient, RunNetworkDiagnostics};
     use irpc_iroh::IrohLazyRemoteConnection;
     use n0_future::time::Duration;
 

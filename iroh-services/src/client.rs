@@ -12,13 +12,10 @@ use iroh::{
 };
 use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
 use iroh_services_proto::{
+    ATTRIBUTE_VALUE_MAX_LENGTH, ATTRIBUTES_MAX_COUNT, Auth, GrantCap, IrohServicesClient,
+    IrohServicesProtocol, NameEndpoint, Ping, Pong as ProtoPong, PutMetrics, PutNetworkDiagnostics,
+    RemoteError as ProtoRemoteError, ServicesMessage, SetAttributes, SetGroup,
     caps::Caps as ProtoCaps,
-    protocol::{
-        ATTRIBUTE_VALUE_MAX_LENGTH, ATTRIBUTES_MAX_COUNT, Auth, GrantCap, IrohServicesClient,
-        IrohServicesProtocol, NameEndpoint, Ping, Pong as ProtoPong, PutMetrics,
-        PutNetworkDiagnostics, RemoteError as ProtoRemoteError, ServicesMessage, SetAttributes,
-        SetGroup,
-    },
 };
 use irpc::{Channels, RpcMessage, WithChannels, channel::none::NoReceiver};
 use irpc_iroh::IrohRemoteConnection;
@@ -1088,7 +1085,7 @@ mod tests {
         Registry,
         encoding::{Decoder, Encoder},
     };
-    use iroh_services_proto::protocol::{IrohServicesProtocol, Pong, ServicesMessage};
+    use iroh_services_proto::{IrohServicesProtocol, Pong, ServicesMessage};
     use irpc::WithChannels;
     use irpc_iroh::read_request;
     use n0_error::AnyError;
