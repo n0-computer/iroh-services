@@ -5,7 +5,6 @@ use iroh_services_proto::caps::{
 };
 use n0_future::time::Duration;
 use rcan::{Expires, Rcan};
-use serde::{Deserialize, Serialize};
 
 use crate::ApiToken;
 
@@ -13,8 +12,7 @@ use crate::ApiToken;
 ///
 /// Construct a capability set with one of the provided methods. The underlying
 /// wire representation is private to this crate.
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
-#[serde(transparent)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Caps(pub(crate) ProtoCaps);
 
 impl Caps {
