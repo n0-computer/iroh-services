@@ -96,7 +96,7 @@ pub struct Pong {
 #[non_exhaustive]
 pub enum RemoteError {
     #[error("Missing capability: {}", _0.0.to_strings().join(", "))]
-    MissingCapability(Caps),
+    MissingCapability(#[serde(with = "missing_capability_serde")] Caps),
     #[error("Unauthorized: {0}")]
     AuthError(String),
     #[error("Internal server error")]
@@ -105,6 +105,26 @@ pub enum RemoteError {
     InvalidInput(String),
     #[error("Rate limit exceeded")]
     RateLimited,
+}
+
+mod missing_capability_serde {
+    use serde::{Deserialize, Serialize};
+
+    use super::{Caps, ProtoCaps};
+
+    pub(super) fn serialize<S>(caps: &Caps, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        caps.0.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Caps, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        ProtoCaps::deserialize(deserializer).map(Caps)
+    }
 }
 
 impl RemoteError {
