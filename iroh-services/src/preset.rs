@@ -30,7 +30,7 @@ use iroh::{Endpoint, RelayMap, RelayMode, RelayUrl, SecretKey, endpoint::presets
 use crate::{
     ClientBuilder,
     api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
-    caps::{Cap, Caps, DEFAULT_CAP_EXPIRY},
+    caps::{Caps, DEFAULT_CAP_EXPIRY},
 };
 
 /// An iroh endpoint preset configured for iroh-services. Build one with
@@ -203,7 +203,7 @@ impl PresetBuilder {
             api_secret.secret.clone(),
             secret_key.public(),
             self.cap_expiry,
-            Caps::new([Cap::Relay(crate::caps::RelayCap::Use)]),
+            Caps::relay_use(),
         )?;
 
         let mut token = data_encoding::BASE32_NOPAD.encode(&rcan.encode());

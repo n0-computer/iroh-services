@@ -247,7 +247,7 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
       - name: iroh-services docs
-        run: cargo docs-rs --locked
+        run: cargo docs-rs --locked -p iroh-services
 
   clippy_check:
     timeout-minutes: 30

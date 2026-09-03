@@ -5,12 +5,18 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use iroh::{
     Endpoint, EndpointAddr, EndpointId,
     endpoint::{ConnectError, Connection},
 };
 use iroh_metrics::{MetricsGroup, Registry, encoding::Encoder};
+use iroh_services_proto::{
+    ATTRIBUTE_VALUE_MAX_LENGTH, ATTRIBUTES_MAX_COUNT, Auth, GrantCap, IrohServicesClient,
+    IrohServicesProtocol, NameEndpoint, Ping, Pong as ProtoPong, PutMetrics, PutNetworkDiagnostics,
+    RemoteError as ProtoRemoteError, ServicesMessage, SetAttributes, SetGroup,
+    caps::Caps as ProtoCaps,
+};
 use irpc::{Channels, RpcMessage, WithChannels, channel::none::NoReceiver};
 use irpc_iroh::IrohRemoteConnection;
 use n0_error::StackResultExt;
@@ -19,19 +25,17 @@ use n0_future::{
     time::{self, Duration},
 };
 use rcan::Rcan;
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 use crate::{
+    ALPN,
     api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
     caps::{Caps, DEFAULT_CAP_EXPIRY},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
-    protocol::{
-        ALPN, Auth, GrantCap, IrohServicesClient, IrohServicesProtocol, NameEndpoint, Ping, Pong,
-        PutMetrics, PutNetworkDiagnostics, RemoteError, ServicesMessage, SetAttributes, SetGroup,
-    },
 };
 
 /// Client is the main handle for interacting with iroh-services. It communicates with
@@ -71,7 +75,7 @@ pub struct Client {
 /// created with [`Client::builder`]
 pub struct ClientBuilder {
     cap_expiry: Duration,
-    cap: Option<Rcan<Caps>>,
+    cap: Option<Rcan<ProtoCaps>>,
     endpoint: Endpoint,
     name: Option<String>,
     group: Option<String>,
@@ -79,6 +83,61 @@ pub struct ClientBuilder {
     metrics_interval: Option<Duration>,
     remote: Option<EndpointAddr>,
     registry: Registry,
+}
+
+/// A response to [`Client::ping`].
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Pong {
+    pub req_id: [u8; 16],
+}
+
+/// An error returned by the remote iroh-services endpoint.
+#[derive(Clone, Serialize, Deserialize, thiserror::Error, Debug)]
+#[non_exhaustive]
+pub enum RemoteError {
+    #[error("Missing capability: {}", _0.0.to_strings().join(", "))]
+    MissingCapability(#[serde(with = "missing_capability_serde")] Caps),
+    #[error("Unauthorized: {0}")]
+    AuthError(String),
+    #[error("Internal server error")]
+    InternalServerError,
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+    #[error("Rate limit exceeded")]
+    RateLimited,
+}
+
+mod missing_capability_serde {
+    use serde::{Deserialize, Serialize};
+
+    use super::{Caps, ProtoCaps};
+
+    pub(super) fn serialize<S>(caps: &Caps, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        caps.0.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<Caps, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        ProtoCaps::deserialize(deserializer).map(Caps)
+    }
+}
+
+impl RemoteError {
+    fn from_proto(error: ProtoRemoteError) -> Self {
+        match error {
+            ProtoRemoteError::MissingCapability(caps) => Self::MissingCapability(Caps(caps)),
+            ProtoRemoteError::AuthError(error) => Self::AuthError(error),
+            ProtoRemoteError::InternalServerError => Self::InternalServerError,
+            ProtoRemoteError::InvalidInput(error) => Self::InvalidInput(error),
+            ProtoRemoteError::RateLimited => Self::RateLimited,
+            _ => Self::InternalServerError,
+        }
+    }
 }
 
 impl ClientBuilder {
@@ -203,18 +262,19 @@ impl ClientBuilder {
     /// capabilities.
     ///
     /// API secrets include remote details within them, and will set both the
-    /// remote and rcan values on the builder
+    /// remote and capability token values on the builder
     pub fn api_secret(mut self, ticket: ApiSecret) -> Result<Self> {
         let local_id = self.endpoint.id();
-        let rcan = crate::caps::create_api_token_from_secret_key(
+        let token = crate::caps::create_api_token_from_secret_key(
             ticket.secret,
             local_id,
             self.cap_expiry,
-            Caps::for_shared_secret(),
+            Caps::client(),
         )?;
 
         self.remote = Some(ticket.remote);
-        self.rcan(rcan)
+        self.cap.replace(token.into_rcan());
+        Ok(self)
     }
 
     /// Loads the private ssh key from the given path, and creates the needed capability.
@@ -230,24 +290,14 @@ impl ClientBuilder {
     #[cfg(not(wasm_browser))]
     pub fn ssh_key(mut self, pem: &str) -> Result<Self> {
         let local_id = self.endpoint.id();
-        let rcan = crate::caps::create_api_token_from_openssh_pem(
+        let token = crate::caps::create_api_token_from_openssh_pem(
             pem,
             local_id,
             self.cap_expiry,
-            Caps::all(),
+            Caps(ProtoCaps::all()),
         )?;
-        self.cap.replace(rcan);
+        self.cap.replace(token.into_rcan());
 
-        Ok(self)
-    }
-
-    /// Sets the rcan directly.
-    pub fn rcan(mut self, cap: Rcan<Caps>) -> Result<Self> {
-        ensure!(
-            EndpointId::from_verifying_key(*cap.audience()) == self.endpoint.id(),
-            "invalid audience"
-        );
-        self.cap.replace(cap);
         Ok(self)
     }
 
@@ -373,31 +423,24 @@ fn validate_name(name: &str) -> Result<(), ValidateNameError> {
     }
 }
 
-/// Maximum length in bytes for an attribute value. Values may be empty.
-pub const CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH: usize = 128;
-/// Maximum number of entries allowed in the attributes map.
-pub const CLIENT_ATTRIBUTES_MAX_COUNT: usize = 128;
-
 /// Error returned when an attributes map fails validation.
 #[derive(Debug, thiserror::Error)]
 pub enum ValidateAttributesError {
-    #[error("Too many attributes (must be no more than {CLIENT_ATTRIBUTES_MAX_COUNT}).")]
+    #[error("Too many attributes (must be no more than {ATTRIBUTES_MAX_COUNT}).")]
     TooManyEntries,
     #[error("Invalid attribute key: {0}")]
     InvalidKey(#[from] ValidateNameError),
-    #[error(
-        "Attribute value too long (must be no more than {CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH} bytes)."
-    )]
+    #[error("Attribute value too long (must be no more than {ATTRIBUTE_VALUE_MAX_LENGTH} bytes).")]
     ValueTooLong,
 }
 
 fn validate_attributes(attrs: &BTreeMap<String, String>) -> Result<(), ValidateAttributesError> {
-    if attrs.len() > CLIENT_ATTRIBUTES_MAX_COUNT {
+    if attrs.len() > ATTRIBUTES_MAX_COUNT {
         return Err(ValidateAttributesError::TooManyEntries);
     }
     for (k, v) in attrs {
         validate_name(k)?;
-        if v.len() > CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH {
+        if v.len() > ATTRIBUTE_VALUE_MAX_LENGTH {
             return Err(ValidateAttributesError::ValueTooLong);
         }
     }
@@ -592,18 +635,15 @@ impl Client {
     /// Grant capabilities to a remote endpoint. Creates a signed RCAN token
     /// and sends it to iroh-services for storage. The remote can then use this token
     /// when dialing back to authorize its requests.
-    pub async fn grant_capability(
-        &self,
-        remote_id: EndpointId,
-        caps: impl IntoIterator<Item = impl Into<crate::caps::Cap>>,
-    ) -> Result<(), Error> {
+    pub async fn grant_capability(&self, remote_id: EndpointId, caps: Caps) -> Result<(), Error> {
         let cap = crate::caps::create_grant_token(
             self.endpoint.secret_key().clone(),
             remote_id,
             DEFAULT_CAP_EXPIRY,
-            Caps::new(caps),
+            caps,
         )
-        .map_err(Error::Other)?;
+        .map_err(Error::Other)?
+        .into_rcan();
 
         let (tx, rx) = oneshot::channel();
         self.message_channel
@@ -642,7 +682,7 @@ enum ClientActorMessage {
     },
     GrantCap {
         // boxed to avoid large enum variants
-        cap: Box<Rcan<Caps>>,
+        cap: Box<Rcan<ProtoCaps>>,
         done: oneshot::Sender<Result<(), Error>>,
     },
     PutNetworkDiagnostics {
@@ -711,7 +751,7 @@ impl RpcClient {
     async fn connect(
         endpoint: &Endpoint,
         remote: EndpointAddr,
-        caps: Rcan<Caps>,
+        caps: Rcan<ProtoCaps>,
     ) -> Result<Self, Error> {
         trace!("client connecting and authorizing");
         let connection = endpoint
@@ -722,13 +762,13 @@ impl RpcClient {
         irpc.rpc(Auth { caps })
             .await
             .inspect_err(|err| debug!("authorization failed: {err:?}"))
-            .map_err(|err| RemoteError::AuthError(err.to_string()))?;
+            .map_err(|err| Error::Remote(RemoteError::AuthError(err.to_string())))?;
         Ok(Self { connection, irpc })
     }
 }
 
 struct ClientActor {
-    capabilities: Rcan<Caps>,
+    capabilities: Rcan<ProtoCaps>,
     endpoint: Endpoint,
     remote: EndpointAddr,
     /// The active authenticated connection, established on demand.
@@ -977,11 +1017,16 @@ impl ClientActor {
 
     async fn send_ping(&mut self) -> Result<Pong, Error> {
         let req = rand::random();
-        self.rpc(Ping { req_id: req }).await
+        let pong: ProtoPong = self.rpc(Ping { req_id: req }).await?;
+        Ok(Pong {
+            req_id: pong.req_id,
+        })
     }
 
     async fn send_name_endpoint(&mut self, name: String) -> Result<(), Error> {
-        self.rpc(NameEndpoint { name: name.clone() }).await??;
+        self.rpc(NameEndpoint { name: name.clone() })
+            .await?
+            .map_err(RemoteError::from_proto)?;
         self.name = Some(name);
         Ok(())
     }
@@ -990,7 +1035,8 @@ impl ClientActor {
         self.rpc(SetGroup {
             group: group.clone(),
         })
-        .await??;
+        .await?
+        .map_err(RemoteError::from_proto)?;
         self.group = Some(group);
         Ok(())
     }
@@ -1002,7 +1048,8 @@ impl ClientActor {
         self.rpc(SetAttributes {
             attributes: attributes.clone(),
         })
-        .await??;
+        .await?
+        .map_err(RemoteError::from_proto)?;
         self.attributes = attributes;
         Ok(())
     }
@@ -1018,17 +1065,23 @@ impl ClientActor {
             session_id: self.session_id,
             update,
         };
-        self.rpc(req).await??;
+        self.rpc(req).await?.map_err(RemoteError::from_proto)?;
         Ok(())
     }
 
-    async fn grant_cap(&mut self, cap: Rcan<Caps>) -> Result<(), Error> {
-        self.rpc(GrantCap { cap }).await??;
+    async fn grant_cap(&mut self, cap: Rcan<ProtoCaps>) -> Result<(), Error> {
+        self.rpc(GrantCap { cap })
+            .await?
+            .map_err(RemoteError::from_proto)?;
         Ok(())
     }
 
     async fn put_network_diagnostics(&mut self, report: DiagnosticsReport) -> Result<(), Error> {
-        self.rpc(PutNetworkDiagnostics { report }).await??;
+        self.rpc(PutNetworkDiagnostics {
+            report: report.into_proto(),
+        })
+        .await?
+        .map_err(RemoteError::from_proto)?;
         Ok(())
     }
 }
@@ -1052,6 +1105,7 @@ mod tests {
         Registry,
         encoding::{Decoder, Encoder},
     };
+    use iroh_services_proto::{IrohServicesProtocol, Pong, ServicesMessage};
     use irpc::WithChannels;
     use irpc_iroh::read_request;
     use n0_error::AnyError;
@@ -1065,13 +1119,12 @@ mod tests {
     use crate::{
         Client, ClientBuilder,
         api_secret::ApiSecret,
-        caps::{Cap, Caps, create_api_token_from_secret_key},
+        caps::Caps,
         client::{
-            API_SECRET_ENV_VAR_NAME, BuildError, CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH,
-            CLIENT_ATTRIBUTES_MAX_COUNT, CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError,
-            ValidateNameError, is_connection_lost,
+            API_SECRET_ENV_VAR_NAME, ATTRIBUTE_VALUE_MAX_LENGTH, ATTRIBUTES_MAX_COUNT, BuildError,
+            CLIENT_NAME_MAX_LENGTH, Error, ValidateAttributesError, ValidateNameError,
+            is_connection_lost,
         },
-        protocol::{ALPN, IrohServicesProtocol, Pong, ServicesMessage},
     };
 
     /// What the test server recorded about one PutMetrics request.
@@ -1195,22 +1248,15 @@ mod tests {
         let server_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
         let client_ep = Endpoint::builder(presets::Minimal).bind().await.unwrap();
         let router = Router::builder(server_ep.clone())
-            .accept(ALPN, server)
+            .accept(crate::ALPN, server)
             .spawn();
 
         let shared_secret = SecretKey::from_bytes(&rng.random());
-        let cap = create_api_token_from_secret_key(
-            shared_secret,
-            client_ep.id(),
-            Duration::from_secs(3600),
-            Caps::for_shared_secret(),
-        )
-        .unwrap();
-
+        let api_secret = ApiSecret::new(shared_secret, server_ep.id());
         let builder = Client::builder(&client_ep)
-            .remote(server_ep.addr())
-            .rcan(cap)
-            .unwrap();
+            .api_secret(api_secret)
+            .unwrap()
+            .remote(server_ep.addr());
         (router, client_ep, builder)
     }
 
@@ -1335,7 +1381,7 @@ mod tests {
         // Compare capability fields individually to avoid flaky timestamp
         // mismatches between the builder's rcan and a freshly-created one.
         let cap = builder.cap.as_ref().expect("expected capability to be set");
-        assert_eq!(cap.capability(), &Caps::new([Cap::Client]));
+        assert_eq!(cap.capability(), &Caps::client().0);
         assert_eq!(cap.audience(), &endpoint.id().as_verifying_key());
         assert_eq!(cap.issuer(), &shared_secret.public().as_verifying_key());
     }
@@ -1615,7 +1661,7 @@ mod tests {
         ));
 
         // more than 128 entries errors
-        let big: Vec<(String, String)> = (0..(CLIENT_ATTRIBUTES_MAX_COUNT + 1))
+        let big: Vec<(String, String)> = (0..(ATTRIBUTES_MAX_COUNT + 1))
             .map(|i| (format!("key_{i:04}"), format!("val_{i}")))
             .collect();
         let Err(err) = Client::builder(&endpoint).attributes(big) else {
@@ -1694,7 +1740,7 @@ mod tests {
         ));
 
         // value over the max length
-        let too_long_value = "x".repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH + 1);
+        let too_long_value = "x".repeat(ATTRIBUTE_VALUE_MAX_LENGTH + 1);
         let err = client
             .set_attributes([("ok", too_long_value.as_str())])
             .await
@@ -1705,7 +1751,7 @@ mod tests {
         ));
 
         // more entries than allowed
-        let big: Vec<(String, String)> = (0..(CLIENT_ATTRIBUTES_MAX_COUNT + 1))
+        let big: Vec<(String, String)> = (0..(ATTRIBUTES_MAX_COUNT + 1))
             .map(|i| (format!("key_{i:04}"), format!("val_{i}")))
             .collect();
         let err = client
@@ -1747,7 +1793,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_attribute_merge_over_limit_rejected() {
         // A client already holding the maximum number of attributes.
-        let full: Vec<(String, String)> = (0..CLIENT_ATTRIBUTES_MAX_COUNT)
+        let full: Vec<(String, String)> = (0..ATTRIBUTES_MAX_COUNT)
             .map(|i| (format!("key_{i:04}"), "v".to_string()))
             .collect();
 
@@ -1791,7 +1837,7 @@ mod tests {
         let client = build_serverless_client(4).await;
 
         // value of exactly the max length is accepted by validation
-        let max_value = "x".repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+        let max_value = "x".repeat(ATTRIBUTE_VALUE_MAX_LENGTH);
         let err = client
             .set_attributes([("ok".to_string(), max_value)])
             .await
@@ -1801,8 +1847,8 @@ mod tests {
             "expected a connect error (validation accepted), got {err:?}"
         );
 
-        // exactly CLIENT_ATTRIBUTES_MAX_COUNT entries is accepted by validation
-        let max_entries: Vec<(String, String)> = (0..CLIENT_ATTRIBUTES_MAX_COUNT)
+        // Exactly ATTRIBUTES_MAX_COUNT entries is accepted by validation.
+        let max_entries: Vec<(String, String)> = (0..ATTRIBUTES_MAX_COUNT)
             .map(|i| (format!("key_{i:04}"), format!("val_{i}")))
             .collect();
         let err = client

@@ -24,12 +24,35 @@ pub struct DiagnosticsReport {
     pub iroh_services_version: String,
 }
 
+impl DiagnosticsReport {
+    pub(crate) fn into_proto(self) -> iroh_services_proto::net_diagnostics::DiagnosticsReport {
+        iroh_services_proto::net_diagnostics::DiagnosticsReport {
+            endpoint_id: self.endpoint_id,
+            net_report: self.net_report,
+            direct_addrs: self.direct_addrs,
+            portmap_probe: self.portmap_probe.map(PortMapProbe::into_proto),
+            iroh_version: self.iroh_version,
+            iroh_services_version: self.iroh_services_version,
+        }
+    }
+}
+
 /// Port mapping protocol availability on the LAN.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortMapProbe {
     pub upnp: bool,
     pub pcp: bool,
     pub nat_pmp: bool,
+}
+
+impl PortMapProbe {
+    fn into_proto(self) -> iroh_services_proto::net_diagnostics::PortMapProbe {
+        iroh_services_proto::net_diagnostics::PortMapProbe {
+            upnp: self.upnp,
+            pcp: self.pcp,
+            nat_pmp: self.nat_pmp,
+        }
+    }
 }
 
 pub mod checks {

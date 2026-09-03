@@ -30,7 +30,12 @@ use crate::{caps::Caps, net_diagnostics::DiagnosticsReport};
 /// new ALPN.
 pub const ALPN: &[u8] = b"/iroh/n0des/1";
 
+/// The ALPN for sending messages from the cloud node to the client.
+pub const CLIENT_HOST_ALPN: &[u8] = b"n0/n0des-client-host/1";
+
 pub type IrohServicesClient = irpc::Client<IrohServicesProtocol>;
+
+pub type ClientHostClient = irpc::Client<ClientHostProtocol>;
 
 /// New request variants MUST be appended, never inserted or reordered. See the
 /// versioning policy on [`ALPN`].
@@ -126,7 +131,7 @@ pub struct Pong {
 #[derive(Debug, derive_more::Display, Serialize, Deserialize)]
 #[display("PutNetworkDiagnostics")]
 pub struct PutNetworkDiagnostics {
-    pub report: crate::net_diagnostics::DiagnosticsReport,
+    pub report: DiagnosticsReport,
 }
 
 /// ask this node to run diagnostics & return the result.
@@ -158,6 +163,12 @@ pub struct SetGroup {
     pub group: String,
 }
 
+/// Maximum length in bytes for an attribute value. Values may be empty.
+pub const ATTRIBUTE_VALUE_MAX_LENGTH: usize = 128;
+
+/// Maximum number of entries allowed in the attributes map.
+pub const ATTRIBUTES_MAX_COUNT: usize = 128;
+
 /// Replace the arbitrary key-value attributes on the client endpoint cloud-side.
 #[derive(Debug, derive_more::Display, Serialize, Deserialize)]
 #[display("SetAttributes")]
@@ -169,8 +180,7 @@ pub struct SetAttributes {
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{RemoteError, SetAttributes, SetGroup};
-    use crate::client::CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH;
+    use super::{ATTRIBUTE_VALUE_MAX_LENGTH, RemoteError, SetAttributes, SetGroup};
 
     #[test]
     fn test_remote_error_wire_compat() {
@@ -185,9 +195,8 @@ mod tests {
         assert_eq!(idx(&RemoteError::RateLimited), 4);
     }
 
-    // The wire format used by irpc (and elsewhere in this crate, see
-    // `api_secret.rs`) is postcard. These round-trips pin the on-the-wire
-    // contract these messages share with the server.
+    // The wire format used by irpc is postcard. These round-trips pin the
+    // on-the-wire contract these messages share with the server.
 
     #[test]
     fn test_set_group_serde_roundtrip() {
@@ -216,8 +225,8 @@ mod tests {
         // unicode key/value plus a value at exactly the documented max length
         let mut attributes = BTreeMap::new();
         attributes.insert("région 🌍".to_string(), "us-wëst 🚀".to_string());
-        let max_value = "x".repeat(CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
-        assert_eq!(max_value.len(), CLIENT_ATTRIBUTE_VALUE_MAX_LENGTH);
+        let max_value = "x".repeat(ATTRIBUTE_VALUE_MAX_LENGTH);
+        assert_eq!(max_value.len(), ATTRIBUTE_VALUE_MAX_LENGTH);
         attributes.insert("max".to_string(), max_value);
 
         let msg = SetAttributes { attributes };

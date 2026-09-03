@@ -4,21 +4,15 @@ use iroh::{
     endpoint::Connection,
     protocol::{AcceptError, ProtocolHandler},
 };
+use iroh_services_proto::{
+    ClientHostProtocol, NetDiagnosticsMessage, RemoteError,
+    caps::{Caps, NetDiagnosticsCap},
+};
 use irpc::WithChannels;
 use irpc_iroh::read_request;
 use n0_error::AnyError;
 use rcan::{Capability, CapabilityOrigin, Rcan};
 use tracing::{debug, warn};
-
-use crate::{
-    caps::{Caps, NetDiagnosticsCap},
-    protocol::{ClientHostProtocol, NetDiagnosticsMessage, RemoteError},
-};
-
-/// The ALPN for sending messages from the cloud node to the client.
-pub const CLIENT_HOST_ALPN: &[u8] = b"n0/n0des-client-host/1";
-
-pub type ClientHostClient = irpc::Client<ClientHostProtocol>;
 
 /// Protocol handler for cloud-to-endpoint connections.
 #[derive(Debug)]
@@ -85,7 +79,7 @@ impl ClientHost {
 
                 let report =
                     crate::net_diagnostics::checks::run_diagnostics(&self.endpoint).await?;
-                tx.send(Ok(report))
+                tx.send(Ok(report.into_proto()))
                     .await
                     .inspect_err(|e| warn!("sending network diagnostics response: {:?}", e))?;
             }
@@ -134,16 +128,12 @@ async fn send_missing_caps<T>(
 #[cfg(test)]
 mod tests {
     use iroh::{address_lookup::MemoryLookup, endpoint::presets, protocol::Router};
+    use iroh_services_proto::{Auth, ClientHostClient, IrohServicesClient, RunNetworkDiagnostics};
     use irpc_iroh::IrohLazyRemoteConnection;
     use n0_future::time::Duration;
 
     use super::*;
-    use crate::{
-        ALPN,
-        caps::create_grant_token,
-        protocol::{Auth, IrohServicesClient, RunNetworkDiagnostics},
-    };
-
+    use crate::{ALPN, CLIENT_HOST_ALPN, caps::create_grant_token};
     #[tokio::test]
     async fn test_diagnostics_host_run_diagnostics() {
         let lookup = MemoryLookup::new();
@@ -169,9 +159,10 @@ mod tests {
             server_ep.secret_key().clone(),
             client_ep.id(),
             Duration::from_secs(3600),
-            Caps::for_shared_secret(),
+            crate::caps::Caps::client(),
         )
-        .unwrap();
+        .unwrap()
+        .into_rcan();
 
         // Connect on the net diagnostics ALPN
         let conn = IrohLazyRemoteConnection::new(
@@ -218,9 +209,10 @@ mod tests {
             client_ep.secret_key().clone(),
             client_ep.id(),
             Duration::from_secs(3600),
-            Caps::for_shared_secret(),
+            crate::caps::Caps::client(),
         )
-        .unwrap();
+        .unwrap()
+        .into_rcan();
 
         let conn =
             IrohLazyRemoteConnection::new(client_ep.clone(), server_ep.addr(), ALPN.to_vec());

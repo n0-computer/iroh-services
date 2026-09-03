@@ -1723,12 +1723,12 @@ dependencies = [
  "bytes",
  "cfg_aliases",
  "data-encoding",
- "derive_more",
  "ed25519-dalek",
  "futures-buffered",
  "getrandom 0.4.2",
  "iroh",
  "iroh-metrics",
+ "iroh-services-proto",
  "iroh-tickets",
  "irpc",
  "irpc-iroh",
@@ -1740,7 +1740,6 @@ dependencies = [
  "rcan",
  "serde",
  "serde_json",
- "strum",
  "temp_env_vars",
  "thiserror 2.0.18",
  "tokio",
@@ -1749,6 +1748,24 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wasm-bindgen-test",
+]
+
+[[package]]
+name = "iroh-services-proto"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "derive_more",
+ "iroh",
+ "iroh-metrics",
+ "irpc",
+ "postcard",
+ "rcan",
+ "serde",
+ "strum",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

@@ -27,13 +27,13 @@ let client = Client::builder(&endpoint)
     .await?;
 ```
 
-See the [`quickstart`](examples/quickstart.rs) example for a runnable version,
+See the [`quickstart`](iroh-services/examples/quickstart.rs) example for a runnable version,
 and [docs.rs](https://docs.rs/iroh-services) for the full API.
 
 ### Network diagnostics
 
 To let iroh-services fetch a connectivity report from an endpoint on demand,
-grant it the `NetDiagnosticsCap::GetAny` capability and accept
+grant it `Caps::net_diagnostics_get_any()` and accept
 `CLIENT_HOST_ALPN` on your router so it can dial back:
 
 ```rust
@@ -45,8 +45,18 @@ let router = Router::builder(endpoint.clone())
     .spawn();
 ```
 
-The [`net_diagnostics`](examples/net_diagnostics.rs) example shows the full
+The [`net_diagnostics`](iroh-services/examples/net_diagnostics.rs) example shows the full
 flow, including granting the capability.
+
+## Workspace crates
+
+This workspace contains two crates:
+
+- [`iroh-services`](iroh-services) is the client-facing crate.
+  Applications should depend on this crate to connect to and interact with iroh-services.
+- [`iroh-services-proto`](iroh-services-proto) contains the raw wire types used by the client
+  internals and the iroh-services backend. Its types are not exposed by the client API.
+  Applications should not depend on this crate directly.
 
 ## License
 

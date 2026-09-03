@@ -32,12 +32,12 @@ mod client;
 mod client_host;
 #[cfg(not(wasm_browser))]
 mod openssh;
+mod token;
 
 pub mod api_secret;
 pub mod caps;
 pub mod net_diagnostics;
 mod preset;
-pub mod protocol;
 
 mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
@@ -56,15 +56,22 @@ pub static IROH_VERSION: std::sync::LazyLock<&str> = std::sync::LazyLock::new(||
 });
 
 pub use anyhow;
-pub use client_host::{CLIENT_HOST_ALPN, ClientHost, ClientHostClient};
+pub use client_host::ClientHost;
 pub use iroh_metrics::Registry;
+pub use token::ApiToken;
+
+/// The main ALPN for connecting from the client to the cloud node.
+pub const ALPN: &[u8] = iroh_services_proto::ALPN;
+
+/// The ALPN for cloud-to-endpoint network diagnostics connections.
+pub const CLIENT_HOST_ALPN: &[u8] = iroh_services_proto::CLIENT_HOST_ALPN;
 
 pub use self::{
     api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
     client::{
-        BuildError, Client, ClientBuilder, Error, ValidateAttributesError, ValidateNameError,
+        BuildError, Client, ClientBuilder, Error, Pong, RemoteError, ValidateAttributesError,
+        ValidateNameError,
     },
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
     preset::{IrohServicesPreset, PresetBuilder, preset},
-    protocol::ALPN,
 };

@@ -11,7 +11,7 @@
 //! Run with: cargo run --example net_diagnostics
 use anyhow::Result;
 use iroh::{Endpoint, protocol::Router};
-use iroh_services::{CLIENT_HOST_ALPN, ClientHost, caps::NetDiagnosticsCap};
+use iroh_services::{CLIENT_HOST_ALPN, ClientHost, caps::Caps};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     let remote_id = preset.api_secret().addr().id;
     let t = tokio::spawn(async move {
         if let Err(err) = client2
-            .grant_capability(remote_id, vec![NetDiagnosticsCap::GetAny])
+            .grant_capability(remote_id, Caps::net_diagnostics_get_any())
             .await
         {
             eprintln!("Failed to grant capability: {err:?}");
