@@ -37,7 +37,7 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Install wasm-bindgen-test-runner
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
         with:
           # Match the version of wasm-bindgen used in Cargo.lock
           tool: wasm-bindgen-cli@0.2.125
