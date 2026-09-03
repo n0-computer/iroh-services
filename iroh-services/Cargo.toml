@@ -72,3 +72,28 @@ name = "net_diagnostics"
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # We use iroh's NetReport type on the wire. Note that this type
+    # is under iroh's unstable-net-report feature, which means it can break at any time.
+    # If it does break, we need to release a new major version of iroh-services
+    # and disallow older iroh versions.
+    "iroh::net_report::report::Report",
+    # Remaining stable iroh types
+    "iroh::endpoint::ConnectError",
+    "iroh::endpoint::Endpoint",
+    "iroh::endpoint::RelayMode",
+    "iroh::endpoint::presets::Preset",
+    "iroh::protocol::ProtocolHandler",
+    # 1.0 crates without unstable features
+    "iroh_base::*",
+    "iroh_relay::*",
+    "iroh_metrics::*",
+    "iroh_tickets::*",
+    "anyhow",
+    "anyhow::*",
+    "serde_core::*",
+    "tokio::sync::mpsc::error::SendError",
+    "tokio::sync::oneshot::error::RecvError"
+]

@@ -354,32 +354,12 @@ pub enum BuildError {
     Unauthorized,
     #[error("Remote error: {0}")]
     Remote(#[from] RemoteError),
-    #[error("Rpc connection error: {0}")]
-    Rpc(irpc::Error),
-    #[error("Connection error: {0}")]
-    Connect(ConnectError),
     #[error("Invalid endpoint name: {0}")]
     InvalidName(#[from] ValidateNameError),
     #[error("Invalid endpoint group: {0}")]
     InvalidGroup(ValidateNameError),
     #[error("Invalid endpoint attributes: {0}")]
     InvalidAttributes(#[from] ValidateAttributesError),
-}
-
-impl From<irpc::Error> for BuildError {
-    fn from(value: irpc::Error) -> Self {
-        match value {
-            irpc::Error::Request {
-                source:
-                    irpc::RequestError::Connection {
-                        source: iroh::endpoint::ConnectionError::ApplicationClosed(frame),
-                        ..
-                    },
-                ..
-            } if frame.error_code == 401u32.into() => Self::Unauthorized,
-            value => Self::Rpc(value),
-        }
-    }
 }
 
 /// How long [`Client::shutdown`] lets a request already in flight finish.
@@ -461,9 +441,9 @@ pub enum Error {
     #[error("Connection error: {0}")]
     Connect(#[from] ConnectError),
     #[error("Rpc error: {0}")]
-    Rpc(#[from] irpc::Error),
+    Rpc(anyhow::Error),
     #[error(transparent)]
-    Other(#[from] anyhow::Error),
+    Other(anyhow::Error),
     #[error("Local client actor is stopped, cannot send requests")]
     ActorStopped,
 }
@@ -657,7 +637,9 @@ impl Client {
 
     /// run local network status diagnostics, optionally uploading the results
     pub async fn net_diagnostics(&self, send: bool) -> Result<DiagnosticsReport, Error> {
-        let report = run_diagnostics(&self.endpoint).await?;
+        let report = run_diagnostics(&self.endpoint)
+            .await
+            .map_err(Error::Other)?;
         if send {
             let (tx, rx) = oneshot::channel();
             self.message_channel
@@ -1012,7 +994,7 @@ impl ClientActor {
         }
 
         res.inspect_err(|err| warn!("rpc error: {err}"))
-            .map_err(Error::from)
+            .map_err(|error| Error::Rpc(error.into()))
     }
 
     async fn send_ping(&mut self) -> Result<Pong, Error> {
