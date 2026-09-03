@@ -5,9 +5,9 @@ use std::{
     str::FromStr,
 };
 
-use anyhow::{Context, anyhow};
 use iroh::{EndpointAddr, EndpointId, SecretKey, TransportAddr};
 use iroh_tickets::{ParseError, Ticket};
+use n0_error::{AnyError, StdResultExt, anyerr};
 use serde::{Deserialize, Serialize};
 
 /// The environment variable name this crate checks in builders for an API secret.
@@ -94,17 +94,16 @@ impl ApiSecret {
     }
 
     /// Read an Api Secret from a given environment variable
-    pub fn from_env_var(env_var: &str) -> anyhow::Result<Self> {
+    pub fn from_env_var(env_var: &str) -> Result<Self, AnyError> {
         match std::env::var(env_var) {
             Ok(ticket_string) if ticket_string.is_empty() => {
-                Err(anyhow!("{env_var} environment variable is set but empty"))
+                Err(anyerr!("{env_var} environment variable is set but empty"))
             }
             Ok(ticket_string) => Self::from_str(&ticket_string)
-                .context(format!("invalid api secret at env var {env_var}")),
-            Err(VarError::NotPresent) => Err(anyhow!("{env_var} environment variable is not set")),
-            Err(VarError::NotUnicode(e)) => Err(anyhow!(
-                "{env_var} environment variable is not valid unicode: {:?}",
-                e
+                .std_context(format!("invalid api secret at env var {env_var}")),
+            Err(VarError::NotPresent) => Err(anyerr!("{env_var} environment variable is not set")),
+            Err(VarError::NotUnicode(e)) => Err(anyerr!(
+                "{env_var} environment variable is not valid unicode: {e:?}"
             )),
         }
     }

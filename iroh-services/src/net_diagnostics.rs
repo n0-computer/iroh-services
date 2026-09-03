@@ -58,14 +58,16 @@ impl PortMapProbe {
 pub mod checks {
     use std::net::SocketAddr;
 
-    use anyhow::Result;
     use iroh::{Endpoint, Watcher};
+    use n0_error::AnyError;
+    #[cfg(not(wasm_browser))]
+    use n0_error::{StdResultExt, anyerr};
     use n0_future::time::Duration;
 
     use super::*;
 
     /// Run full network diagnostics on an existing endpoint. 10s timeout.
-    pub async fn run_diagnostics(endpoint: &Endpoint) -> Result<DiagnosticsReport> {
+    pub async fn run_diagnostics(endpoint: &Endpoint) -> Result<DiagnosticsReport, AnyError> {
         run_diagnostics_with_timeout(endpoint, Duration::from_secs(10)).await
     }
 
@@ -73,7 +75,7 @@ pub mod checks {
     async fn run_diagnostics_with_timeout(
         endpoint: &Endpoint,
         timeout: Duration,
-    ) -> Result<DiagnosticsReport> {
+    ) -> Result<DiagnosticsReport, AnyError> {
         let endpoint_id = endpoint.id();
 
         // 1. Wait for relay connection
@@ -104,7 +106,7 @@ pub mod checks {
             match n0_future::time::timeout(Duration::from_secs(5), probe_port_mapping()).await {
                 Ok(Ok(p)) => Some(p),
                 Ok(Err(e)) => {
-                    tracing::warn!("portmap probe failed: {e}");
+                    tracing::warn!("portmap probe failed: {e:#}");
                     None
                 }
                 Err(_) => {
@@ -133,7 +135,7 @@ pub mod checks {
     }
 
     #[cfg(not(wasm_browser))]
-    async fn probe_port_mapping() -> Result<PortMapProbe> {
+    async fn probe_port_mapping() -> Result<PortMapProbe, AnyError> {
         let config = portmapper::Config {
             enable_upnp: true,
             enable_pcp: true,
@@ -142,7 +144,7 @@ pub mod checks {
         };
         let client = portmapper::Client::new(config);
         let probe_rx = client.probe();
-        let probe = probe_rx.await?.map_err(|e| anyhow::anyhow!(e))?;
+        let probe = probe_rx.await.anyerr()?.map_err(|e| anyerr!(e))?;
         Ok(PortMapProbe {
             upnp: probe.upnp,
             pcp: probe.pcp,

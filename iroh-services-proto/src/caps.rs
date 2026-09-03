@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fmt, str::FromStr};
 
-use anyhow::{Context, Result, bail};
+use n0_error::{AnyError, StdResultExt, anyerr, bail_any};
 use rcan::Capability;
 use serde::{Deserialize, Serialize};
 
@@ -82,20 +82,22 @@ pub enum Cap {
 }
 
 impl FromStr for Cap {
-    type Err = anyhow::Error;
+    type Err = AnyError;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s == "all" {
             Ok(Self::All)
         } else if let Some((domain, inner)) = s.split_once(":") {
             Ok(match domain {
-                "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
-                "relay" => Self::Relay(RelayCap::from_str(inner)?),
-                "net-diagnostics" => Self::NetDiagnostics(NetDiagnosticsCap::from_str(inner)?),
-                _ => bail!("invalid cap domain"),
+                "metrics" => Self::Metrics(MetricsCap::from_str(inner).anyerr()?),
+                "relay" => Self::Relay(RelayCap::from_str(inner).anyerr()?),
+                "net-diagnostics" => {
+                    Self::NetDiagnostics(NetDiagnosticsCap::from_str(inner).anyerr()?)
+                }
+                _ => bail_any!("invalid cap domain"),
             })
         } else {
-            Err(anyhow::anyhow!("invalid cap string"))
+            Err(anyerr!("invalid cap string"))
         }
     }
 }
@@ -143,7 +145,7 @@ impl Caps {
         Self::V0(set)
     }
 
-    pub fn from_strs<'a>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self> {
+    pub fn from_strs<'a>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self, AnyError> {
         Ok(Self::V0(CapSet::from_strs(strs)?))
     }
 
@@ -257,14 +259,14 @@ impl<C: Capability + Ord> CapSet<C> {
         self.0.insert(cap.into())
     }
 
-    pub fn from_strs<'a, E>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self>
+    pub fn from_strs<'a, E>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self, AnyError>
     where
         C: FromStr<Err = E>,
-        Result<C, E>: anyhow::Context<C, E>,
+        E: std::error::Error + Send + Sync + 'static,
     {
         let mut caps = Self::default();
         for s in strs {
-            let cap = C::from_str(s).with_context(|| format!("Unknown capability: {s}"))?;
+            let cap = C::from_str(s).with_std_context(|_| format!("Unknown capability: {s}"))?;
             caps.insert(cap);
         }
         Ok(caps)

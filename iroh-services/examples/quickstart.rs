@@ -1,7 +1,7 @@
 use iroh::Endpoint;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> n0_error::Result<()> {
     tracing_subscriber::fmt::init();
 
     // needs IROH_SERVICES_API_SECRET set as an environment variable.

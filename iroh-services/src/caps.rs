@@ -1,8 +1,8 @@
-use anyhow::Result;
 use iroh::{EndpointId, SecretKey};
 use iroh_services_proto::caps::{
     Caps as ProtoCaps, NetDiagnosticsCap as ProtoNetDiagnosticsCap, RelayCap as ProtoRelayCap,
 };
+use n0_error::AnyError;
 use n0_future::time::Duration;
 use rcan::{Expires, Rcan};
 
@@ -42,7 +42,7 @@ pub fn create_api_token_from_openssh_pem(
     local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<ApiToken> {
+) -> Result<ApiToken, AnyError> {
     let seed = crate::openssh::parse_ed25519_private_key(pem)?;
     let issuer = ed25519_dalek::SigningKey::from_bytes(&seed);
     let audience = local_id.as_verifying_key();
@@ -59,7 +59,7 @@ pub fn create_grant_token(
     remote_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<ApiToken> {
+) -> Result<ApiToken, AnyError> {
     let issuer = ed25519_dalek::SigningKey::from_bytes(&local_secret.to_bytes());
     let audience = remote_id.as_verifying_key();
     let can =
@@ -73,7 +73,7 @@ pub fn create_api_token_from_secret_key(
     local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<ApiToken> {
+) -> Result<ApiToken, AnyError> {
     let issuer = ed25519_dalek::SigningKey::from_bytes(&private_key.to_bytes());
     let audience = local_id.as_verifying_key();
     let can =

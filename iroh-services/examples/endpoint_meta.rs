@@ -12,7 +12,7 @@ use iroh::{Endpoint, endpoint::presets};
 use iroh_services::Client;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> n0_error::Result<()> {
     tracing_subscriber::fmt::init();
 
     let endpoint = Endpoint::bind(presets::N0).await?;

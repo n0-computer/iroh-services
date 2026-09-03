@@ -9,9 +9,9 @@
 //! iroh-services service can dial back into this endpoint to request diagnostics.
 //!
 //! Run with: cargo run --example net_diagnostics
-use anyhow::Result;
 use iroh::{Endpoint, protocol::Router};
 use iroh_services::{CLIENT_HOST_ALPN, ClientHost, caps::Caps};
+use n0_error::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
