@@ -23,3 +23,26 @@ uuid = { version = "1.17", features = ["serde"] }
 
 [dev-dependencies]
 postcard = { version = "1.1.3", features = ["use-std"] }
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = [
+    # This crate depends on irpc and rcan types, which are not at 1.0,
+    # so major bumps in these crates need a major bump of iroh-services-proto too.
+    "rcan::*",
+    "irpc::*",
+    # We use iroh's NetReport type on the wire. Note that this type
+    # is under iroh's unstable-net-report feature, which means it can break at any time.
+    # If it does break, we need to release a new major version of iroh-services-proto
+    # and disallow older iroh versions.
+    "iroh::net_report::report::Report",
+    # non 1.0 crates:
+    # We are using strum to parse caps from strings, which brings an error type.
+    "strum::ParseError",
+    # 1.0 crates without unstable features
+    "anyhow::*",
+    "iroh_base::*",
+    "iroh_metrics::*",
+    "serde_core::*",
+    "tracing::span::Span",
+    "uuid::Uuid",
+]
