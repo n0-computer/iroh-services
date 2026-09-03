@@ -8,7 +8,7 @@
 //! use iroh_services::Client;
 //!
 //! #[tokio::main]
-//! async fn main() -> anyhow::Result<()> {
+//! async fn main() -> n0_error::Result<()> {
 //!     let endpoint = Endpoint::bind(presets::N0).await?;
 //!
 //!     // needs IROH_SERVICES_API_SECRET set to an environment variable
@@ -55,9 +55,9 @@ pub static IROH_VERSION: std::sync::LazyLock<&str> = std::sync::LazyLock::new(||
         .1
 });
 
-pub use anyhow;
 pub use client_host::ClientHost;
 pub use iroh_metrics::Registry;
+pub use n0_error;
 pub use token::ApiToken;
 
 /// The main ALPN for connecting from the client to the cloud node.

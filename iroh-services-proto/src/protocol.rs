@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use anyhow::Result;
 use irpc::{channel::oneshot, rpc_requests};
+use n0_error::stack_error;
 use rcan::Rcan;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -80,7 +80,10 @@ pub enum ClientHostProtocol {
 
 pub type RemoteResult<T> = Result<T, RemoteError>;
 
-#[derive(Clone, Serialize, Deserialize, thiserror::Error, Debug)]
+// No `add_meta` here: this is a wire type, and `n0_error::Meta` is not
+// serializable.
+#[stack_error(derive)]
+#[derive(Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum RemoteError {
     // The first three variants and their order are the v1 wire contract: postcard
@@ -89,11 +92,11 @@ pub enum RemoteError {
     // server must only send new variants in response to new (v2+) requests.
     #[error("Missing capability: {}", _0.to_strings().join(", "))]
     MissingCapability(Caps),
-    #[error("Unauthorized: {}", _0)]
+    #[error("Unauthorized: {_0}")]
     AuthError(String),
     #[error("Internal server error")]
     InternalServerError,
-    #[error("Invalid input: {}", _0)]
+    #[error("Invalid input: {_0}")]
     InvalidInput(String),
     #[error("Rate limit exceeded")]
     RateLimited,

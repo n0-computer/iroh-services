@@ -12,7 +12,7 @@
 use iroh::Endpoint;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> n0_error::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Public relays. This is the minimal preset, and works with a free iroh

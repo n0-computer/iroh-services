@@ -11,7 +11,7 @@
 //! ```no_run
 //! use iroh::Endpoint;
 //!
-//! async fn run() -> anyhow::Result<()> {
+//! async fn run() -> n0_error::Result<()> {
 //!     let preset = iroh_services::preset()
 //!         .relays(["https://us-east1.project_username.iroh.link"])?
 //!         .api_secret_from_env()?
@@ -24,8 +24,8 @@
 //! ```
 use std::{str::FromStr, time::Duration};
 
-use anyhow::{Context, Result, anyhow};
 use iroh::{Endpoint, RelayMap, RelayMode, RelayUrl, SecretKey, endpoint::presets::Preset};
+use n0_error::{AnyError, StdResultExt, anyerr};
 
 use crate::{
     ClientBuilder,
@@ -98,7 +98,7 @@ pub struct PresetBuilder {
 /// `N0` plus a project access token for the public relays:
 ///
 /// ```no_run
-/// # async fn run() -> anyhow::Result<()> {
+/// # async fn run() -> n0_error::Result<()> {
 /// let preset = iroh_services::preset().api_secret_from_env()?.build()?;
 /// let endpoint = iroh::Endpoint::bind(preset.clone()).await?;
 /// // reuses the preset's api secret, no need to pass it twice
@@ -126,7 +126,7 @@ impl PresetBuilder {
     /// Set relay URLs. This method accepts any iterator of &str, allowing the
     /// common pattern:
     /// ```no_run
-    /// fn build() -> anyhow::Result<()> {
+    /// fn build() -> n0_error::Result<()> {
     ///     let _preset = iroh_services::preset()
     ///         .relays([
     ///             "https://us-east1.project_username.iroh.link",
@@ -138,7 +138,7 @@ impl PresetBuilder {
     ///     Ok(())
     /// }
     /// ```
-    pub fn relays<I, S>(mut self, relays: I) -> Result<Self>
+    pub fn relays<I, S>(mut self, relays: I) -> Result<Self, AnyError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -148,9 +148,9 @@ impl PresetBuilder {
             .map(|s| {
                 let s = s.as_ref();
                 s.parse::<RelayUrl>()
-                    .with_context(|| format!("invalid relay url {s:?}"))
+                    .with_std_context(|_| format!("invalid relay url {s:?}"))
             })
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>, AnyError>>()?;
 
         self.relays = RelayMap::from_iter(parsed);
         Ok(self)
@@ -170,14 +170,15 @@ impl PresetBuilder {
     }
 
     /// Check IROH_SERVICES_API_SECRET environment variable for a valid API secret
-    pub fn api_secret_from_env(self) -> Result<Self> {
+    pub fn api_secret_from_env(self) -> Result<Self, AnyError> {
         let ticket = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
         Ok(self.api_secret(ticket))
     }
 
     /// set client API secret from an encoded string
-    pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self> {
-        let key = ApiSecret::from_str(secret_key).context("invalid iroh services api secret")?;
+    pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self, AnyError> {
+        let key =
+            ApiSecret::from_str(secret_key).std_context("invalid iroh services api secret")?;
         Ok(self.api_secret(key))
     }
 
@@ -189,11 +190,11 @@ impl PresetBuilder {
     }
 
     /// Finalize the configuration into an [`IrohServicesPreset`].
-    pub fn build(self) -> Result<IrohServicesPreset> {
+    pub fn build(self) -> Result<IrohServicesPreset, AnyError> {
         let secret_key = self.secret_key.unwrap_or_else(SecretKey::generate);
 
         let Some(api_secret) = self.api_secret else {
-            return Err(anyhow!(
+            return Err(anyerr!(
                 "api secret is required to use iroh_services relay preset"
             ));
         };
