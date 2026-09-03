@@ -1717,7 +1717,6 @@ dependencies = [
 name = "iroh-services"
 version = "1.0.0"
 dependencies = [
- "anyhow",
  "base64",
  "built",
  "bytes",
@@ -1741,7 +1740,6 @@ dependencies = [
  "serde",
  "serde_json",
  "temp_env_vars",
- "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
@@ -1754,16 +1752,15 @@ dependencies = [
 name = "iroh-services-proto"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "derive_more",
  "iroh",
  "iroh-metrics",
  "irpc",
+ "n0-error",
  "postcard",
  "rcan",
  "serde",
  "strum",
- "thiserror 2.0.18",
  "tracing",
  "uuid",
 ]
@@ -2064,11 +2061,10 @@ dependencies = [
 
 [[package]]
 name = "n0-error"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c37e81176a83a77d2514528b91bdafc70ef88aab428f0e1b91aebb8d99888895"
+checksum = "26c59ea174675ce6bc196878851e5049e11b8b1f9af3ba87e4d6df8d828bb001"
 dependencies = [
- "anyhow",
  "n0-error-macros",
  "spez",
 ]

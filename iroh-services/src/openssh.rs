@@ -3,8 +3,8 @@
 //! See <https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.key>
 //! for the on-disk format.
 
-use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use n0_error::{AnyError, StackResultExt, StdResultExt, bail_any, ensure_any};
 
 const MAGIC: &[u8] = b"openssh-key-v1\0";
 const PEM_BEGIN: &str = "-----BEGIN OPENSSH PRIVATE KEY-----";
@@ -12,7 +12,7 @@ const PEM_END: &str = "-----END OPENSSH PRIVATE KEY-----";
 
 /// Parse an unencrypted OpenSSH ed25519 private key (PEM-encoded) and return
 /// the 32-byte ed25519 seed.
-pub(crate) fn parse_ed25519_private_key(pem: &str) -> Result<[u8; 32]> {
+pub(crate) fn parse_ed25519_private_key(pem: &str) -> Result<[u8; 32], AnyError> {
     let begin = pem.find(PEM_BEGIN).context("missing OpenSSH PEM header")?;
     let after_header = begin + PEM_BEGIN.len();
     let end_offset = pem[after_header..]
@@ -24,35 +24,35 @@ pub(crate) fn parse_ed25519_private_key(pem: &str) -> Result<[u8; 32]> {
         .collect();
     let bytes = STANDARD
         .decode(body.as_bytes())
-        .context("invalid base64 in OpenSSH key")?;
+        .std_context("invalid base64 in OpenSSH key")?;
 
     let mut r = Reader::new(&bytes);
-    ensure!(r.take(MAGIC.len())? == MAGIC, "not an OpenSSH v1 key");
+    ensure_any!(r.take(MAGIC.len())? == MAGIC, "not an OpenSSH v1 key");
     let cipher = r.string()?;
-    ensure!(
+    ensure_any!(
         cipher == b"none",
         "encrypted OpenSSH keys are not supported"
     );
     let kdf = r.string()?;
-    ensure!(kdf == b"none", "OpenSSH key has unexpected kdf");
+    ensure_any!(kdf == b"none", "OpenSSH key has unexpected kdf");
     let _kdf_options = r.string()?;
     let nkeys = r.u32()?;
-    ensure!(nkeys == 1, "expected exactly one OpenSSH key, got {nkeys}");
+    ensure_any!(nkeys == 1, "expected exactly one OpenSSH key, got {nkeys}");
     let _public_key = r.string()?;
     let private_section = r.string()?;
 
     let mut r = Reader::new(private_section);
     let c1 = r.u32()?;
     let c2 = r.u32()?;
-    ensure!(c1 == c2, "OpenSSH checkint mismatch (key may be encrypted)");
+    ensure_any!(c1 == c2, "OpenSSH checkint mismatch (key may be encrypted)");
     let keytype = r.string()?;
-    ensure!(
+    ensure_any!(
         keytype == b"ssh-ed25519",
         "only ed25519 OpenSSH keys are supported"
     );
     let _public = r.string()?;
     let private = r.string()?;
-    ensure!(
+    ensure_any!(
         private.len() == 64,
         "unexpected ed25519 private key length: {}",
         private.len()
@@ -72,21 +72,21 @@ impl<'a> Reader<'a> {
         Self { buf }
     }
 
-    fn take(&mut self, n: usize) -> Result<&'a [u8]> {
+    fn take(&mut self, n: usize) -> Result<&'a [u8], AnyError> {
         if self.buf.len() < n {
-            bail!("truncated OpenSSH key");
+            bail_any!("truncated OpenSSH key");
         }
         let (head, tail) = self.buf.split_at(n);
         self.buf = tail;
         Ok(head)
     }
 
-    fn u32(&mut self) -> Result<u32> {
+    fn u32(&mut self) -> Result<u32, AnyError> {
         let b = self.take(4)?;
         Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
     }
 
-    fn string(&mut self) -> Result<&'a [u8]> {
+    fn string(&mut self) -> Result<&'a [u8], AnyError> {
         let len = self.u32()? as usize;
         self.take(len)
     }

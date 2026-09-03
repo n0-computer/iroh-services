@@ -9,15 +9,14 @@ repository = "https://github.com/n0-computer/iroh-services"
 rust-version = "1.91"
 
 [dependencies]
-anyhow = "1.0.95"
 derive_more = { version = "2.0.1", features = ["display", "from"] }
 irpc = { version = "0.17", default-features = false, features = ["derive", "rpc", "stream", "spans"] }
 iroh = { version = "1.0.0", default-features = false, features = ["unstable-net-report"] }
 iroh-metrics = { version = "1.0.0", default-features = false }
+n0-error = "1.0.0"
 rcan = "0.4"
 serde = { version = "1.0.217", features = ["derive"] }
 strum = { version = "0.28", features = ["derive"] }
-thiserror = "2.0.12"
 tracing = "0.1.41"
 uuid = { version = "1.17", features = ["serde"] }
 
@@ -39,7 +38,7 @@ allowed_external_types = [
     # We are using strum to parse caps from strings, which brings an error type.
     "strum::ParseError",
     # 1.0 crates without unstable features
-    "anyhow::*",
+    "n0_error::*",
     "iroh_base::*",
     "iroh_metrics::*",
     "serde_core::*",
