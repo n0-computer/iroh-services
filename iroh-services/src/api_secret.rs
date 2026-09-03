@@ -114,3 +114,33 @@ impl ApiSecret {
         &self.remote
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The ticket string is a credential users store outside the process, so
+    /// its encoding has to survive across releases the same way the wire
+    /// format does. This pins the format released as iroh-services 1.0.0.
+    ///
+    /// The cross-version wire encoding is covered separately, in
+    /// `iroh-services-proto/tests/wire_compat.rs`.
+    #[test]
+    fn test_ticket_encoding_matches_v1() {
+        const V1_TICKET: &str = "servicesaaqcukrkfivcukrkfivcukrkfivcukrkfivcukrkfivcukrkfivcuksfbcqhvkkbob7t5mw3steis6uawlars5dww3pccowcoppx3bwe74aa";
+
+        let secret = SecretKey::from_bytes(&[42u8; 32]);
+        let remote = SecretKey::from_bytes(&[43u8; 32]).public();
+        let ticket = ApiSecret::new(secret.clone(), remote);
+        assert_eq!(
+            ticket.to_string(),
+            V1_TICKET,
+            "the api secret encoding changed since iroh-services 1.0.0, \
+             which invalidates every secret already issued"
+        );
+
+        let parsed = ApiSecret::from_str(V1_TICKET).expect("a v1 ticket must still parse");
+        assert_eq!(parsed.secret.to_bytes(), secret.to_bytes());
+        assert_eq!(parsed.remote.id, remote);
+    }
+}

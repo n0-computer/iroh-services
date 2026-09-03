@@ -22,6 +22,10 @@ tracing = "0.1.41"
 uuid = { version = "1.17", features = ["serde"] }
 
 [dev-dependencies]
+ed25519-dalek = { version = "=3.0.0-rc.0" }
+# The last released version, to compare the current wire encoding against.
+# See tests/wire_compat.rs.
+iroh-services-v1 = { package = "iroh-services", version = "1.0.0" }
 postcard = { version = "1.1.3", features = ["use-std"] }
 
 [package.metadata.cargo_check_external_types]
