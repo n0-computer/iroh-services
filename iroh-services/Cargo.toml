@@ -41,7 +41,7 @@ futures-buffered = "0.2.12"
 rand = "0.10.1"
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
-base64 = "0.22"
+base64 = "0.23"
 portmapper = "0.19"
 
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
