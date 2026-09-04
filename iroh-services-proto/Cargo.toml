@@ -10,11 +10,14 @@ rust-version = "1.91"
 
 [dependencies]
 anyhow = "1.0.95"
+data-encoding = "2"
 derive_more = { version = "2.0.1", features = ["display", "from"] }
+iroh-rcan = { version = "0.1.0", git = "https://github.com/n0-computer/rcan", branch = "matheus23/iroh-rcan" }
 irpc = { version = "0.17", default-features = false, features = ["derive", "rpc", "stream", "spans"] }
 iroh = { version = "1.0.0", default-features = false, features = ["unstable-net-report"] }
 iroh-metrics = { version = "1.0.0", default-features = false }
 rcan = "0.4"
+rcan-v2 = { package = "rcan", git = "https://github.com/n0-computer/rcan", branch = "matheus23/iroh-rcan" }
 serde = { version = "1.0.217", features = ["derive"] }
 strum = { version = "0.28", features = ["derive"] }
 thiserror = "2.0.12"
