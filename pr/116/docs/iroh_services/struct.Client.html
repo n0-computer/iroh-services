@@ -5,7 +5,7 @@ Client requires either an Ssh Key or <a href="api_secret/struct.ApiSecret.html" 
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>iroh::{Endpoint, endpoint::presets};
 <span class="kw">use </span>iroh_services::Client;
 
-<span class="kw">async fn </span>build_client() -&gt; n0_error::Result&lt;()&gt; {
+<span class="kw">async fn </span>build_client() -&gt; anyhow::Result&lt;()&gt; {
     <span class="kw">let </span>endpoint = Endpoint::bind(presets::N0).<span class="kw">await</span><span class="question-mark">?</span>;
 
     <span class="comment">// needs IROH_SERVICES_API_SECRET set to an environment variable

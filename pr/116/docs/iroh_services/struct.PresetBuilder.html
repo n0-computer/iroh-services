@@ -7,7 +7,7 @@ endpoint will generate a fresh random key at bind time.</p>
     S: <a class="trait" href="https://doc.rust-lang.org/nightly/core/convert/trait.AsRef.html" title="trait core::convert::AsRef">AsRef</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>&gt;,</div></h4></section></summary><div class="docblock"><p>Set relay URLs. This method accepts any iterator of &amp;str, allowing the
 common pattern:</p>
 
-<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">fn </span>build() -&gt; n0_error::Result&lt;()&gt; {
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">fn </span>build() -&gt; anyhow::Result&lt;()&gt; {
     <span class="kw">let </span>_preset = iroh_services::preset()
         .relays([
             <span class="string">"https://us-east1.project_username.iroh.link"</span>,
