@@ -4,7 +4,7 @@ use iroh::{Endpoint, RelayMode, address_lookup::PkarrResolver, protocol::Router}
 #[cfg(not(wasm_browser))]
 use iroh_services::API_SECRET_ENV_VAR_NAME;
 use iroh_services::{ApiSecret, Client, caps::Caps, preset};
-use n0_error::{Result, StdResultExt};
+use n0_error::{Result, StackResultExt, StdResultExt};
 #[cfg(not(wasm_browser))]
 use tokio::test;
 use tracing_subscriber::EnvFilter;
@@ -39,16 +39,16 @@ async fn main_integration_test() -> Result {
         .bind()
         .await?;
     let services = Client::builder(&endpoint)
-        .api_secret(secret.clone())?
+        .api_secret(secret.clone())
         .name(format!("iroh-services integration-rs {}", env!("TARGET")))?
         .build()
         .await
-        .std_context("failed building iroh-services client")?;
+        .context("failed building iroh-services client")?;
 
     services
         .grant_capability(secret.addr().id, Caps::net_diagnostics_get_any())
         .await
-        .std_context("failed granting net diagnostics capability")?;
+        .context("failed granting net diagnostics capability")?;
 
     let host = iroh_services::ClientHost::new(&endpoint);
 
@@ -58,20 +58,17 @@ async fn main_integration_test() -> Result {
 
     endpoint.online().await;
 
-    services
-        .ping()
-        .await
-        .std_context("iroh-services ping failed")?;
+    services.ping().await.context("iroh-services ping failed")?;
 
     services
         .push_metrics()
         .await
-        .std_context("iroh-services metrics upload failed")?;
+        .context("iroh-services metrics upload failed")?;
 
     services
         .net_diagnostics(true)
         .await
-        .std_context("iroh-services net diagnostics with upload failed")?;
+        .context("iroh-services net diagnostics with upload failed")?;
 
     router
         .shutdown()

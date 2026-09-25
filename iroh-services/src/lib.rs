@@ -72,5 +72,5 @@ pub use self::{
         ValidateNameError,
     },
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
-    preset::{IrohServicesPreset, PresetBuilder, preset},
+    preset::{IrohServicesPreset, PresetBuilder, PresetError, preset},
 };

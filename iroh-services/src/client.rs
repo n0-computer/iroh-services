@@ -18,7 +18,7 @@ use iroh_services_proto::{
 };
 use irpc::{Channels, RpcMessage, WithChannels, channel::none::NoReceiver};
 use irpc_iroh::IrohRemoteConnection;
-use n0_error::{AnyError, StdResultExt, e, stack_error};
+use n0_error::{AnyError, e, stack_error};
 use n0_future::{
     task::{self, AbortOnDropHandle},
     time::{self, Duration},
@@ -30,9 +30,11 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
+#[cfg(not(wasm_browser))]
+use crate::caps::OpenSshKeyError;
 use crate::{
     ALPN,
-    api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
+    api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret, FromEnvError},
     caps::{Caps, DEFAULT_CAP_EXPIRY},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
 };
@@ -249,16 +251,15 @@ impl ClientBuilder {
     }
 
     /// Check IROH_SERVICES_API_SECRET environment variable for a valid API secret
-    pub fn api_secret_from_env(self) -> Result<Self, AnyError> {
+    pub fn api_secret_from_env(self) -> Result<Self, BuildError> {
         let ticket = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
-        self.api_secret(ticket)
+        Ok(self.api_secret(ticket))
     }
 
     /// set client API secret from an encoded string
-    pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self, AnyError> {
-        let key =
-            ApiSecret::from_str(secret_key).std_context("invalid iroh services api secret")?;
-        self.api_secret(key)
+    pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self, BuildError> {
+        let key = ApiSecret::from_str(secret_key)?;
+        Ok(self.api_secret(key))
     }
 
     /// Use a shared secret & remote iroh-services endpoint ID contained within a ticket
@@ -267,18 +268,18 @@ impl ClientBuilder {
     ///
     /// API secrets include remote details within them, and will set both the
     /// remote and capability token values on the builder
-    pub fn api_secret(mut self, ticket: ApiSecret) -> Result<Self, AnyError> {
+    pub fn api_secret(mut self, ticket: ApiSecret) -> Self {
         let local_id = self.endpoint.id();
         let token = crate::caps::create_api_token_from_secret_key(
             ticket.secret,
             local_id,
             self.cap_expiry,
             Caps::client(),
-        )?;
+        );
 
         self.remote = Some(ticket.remote);
         self.cap.replace(token.into_rcan());
-        Ok(self)
+        self
     }
 
     /// Loads the private ssh key from the given path, and creates the needed capability.
@@ -288,14 +289,16 @@ impl ClientBuilder {
     pub async fn ssh_key_from_file<P: AsRef<std::path::Path>>(
         self,
         path: P,
-    ) -> Result<Self, AnyError> {
-        let file_content = tokio::fs::read_to_string(path).await?;
+    ) -> Result<Self, BuildError> {
+        let file_content = tokio::fs::read_to_string(path)
+            .await
+            .map_err(|source| e!(BuildError::SshKeyFile, source))?;
         self.ssh_key(&file_content)
     }
 
     /// Creates the capability from the provided PEM-encoded OpenSSH ed25519 private key.
     #[cfg(not(wasm_browser))]
-    pub fn ssh_key(mut self, pem: &str) -> Result<Self, AnyError> {
+    pub fn ssh_key(mut self, pem: &str) -> Result<Self, BuildError> {
         let local_id = self.endpoint.id();
         let token = crate::caps::create_api_token_from_openssh_pem(
             pem,
@@ -375,6 +378,28 @@ pub enum BuildError {
     InvalidAttributes {
         #[error(from)]
         source: ValidateAttributesError,
+    },
+    #[error("Failed to read the api secret from the environment")]
+    ApiSecretEnv {
+        #[error(from)]
+        source: FromEnvError,
+    },
+    #[error("Invalid api secret")]
+    ApiSecretParse {
+        #[error(from)]
+        source: iroh_tickets::ParseError,
+    },
+    #[cfg(not(wasm_browser))]
+    #[error("Invalid OpenSSH key")]
+    SshKey {
+        #[error(from)]
+        source: OpenSshKeyError,
+    },
+    #[cfg(not(wasm_browser))]
+    #[error("Failed to read the OpenSSH key file")]
+    SshKeyFile {
+        #[error(std_err)]
+        source: std::io::Error,
     },
 }
 
@@ -473,8 +498,6 @@ pub enum Error {
     },
     #[error("Rpc error")]
     Rpc { source: AnyError },
-    #[error(transparent)]
-    Other { source: AnyError },
     #[error("Local client actor is stopped, cannot send requests")]
     ActorStopped,
 }
@@ -655,7 +678,6 @@ impl Client {
             DEFAULT_CAP_EXPIRY,
             caps,
         )
-        .map_err(|source| e!(Error::Other, source))?
         .into_rcan();
 
         let (tx, rx) = oneshot::channel();
@@ -670,9 +692,7 @@ impl Client {
 
     /// run local network status diagnostics, optionally uploading the results
     pub async fn net_diagnostics(&self, send: bool) -> Result<DiagnosticsReport, Error> {
-        let report = run_diagnostics(&self.endpoint)
-            .await
-            .map_err(|source| e!(Error::Other, source))?;
+        let report = run_diagnostics(&self.endpoint).await;
         if send {
             let (tx, rx) = oneshot::channel();
             self.message_channel
@@ -1269,7 +1289,6 @@ mod tests {
         let api_secret = ApiSecret::new(shared_secret, server_ep.id());
         let builder = Client::builder(&client_ep)
             .api_secret(api_secret)
-            .unwrap()
             .remote(server_ep.addr());
         (router, client_ep, builder)
     }
@@ -1414,7 +1433,6 @@ mod tests {
         let client = Client::builder(&endpoint)
             .disable_metrics_interval()
             .api_secret(api_secret)
-            .unwrap()
             .build()
             .await
             .unwrap();
@@ -1436,7 +1454,6 @@ mod tests {
 
         let client = Client::builder(&endpoint)
             .api_secret(api_secret)
-            .unwrap()
             .build()
             .await
             .unwrap();
@@ -1536,7 +1553,6 @@ mod tests {
 
         let client = Client::builder(&endpoint)
             .api_secret(api_secret)
-            .unwrap()
             // TEST-NET-1, routable but silently dropped, so the dial hangs
             // instead of failing fast the way an address-less remote would.
             .remote(
@@ -1566,8 +1582,7 @@ mod tests {
         let builder = Client::builder(&endpoint)
             .name("my-node 👋")
             .unwrap()
-            .api_secret(api_secret)
-            .unwrap();
+            .api_secret(api_secret);
 
         assert_eq!(builder.name, Some("my-node 👋".to_string()));
 
@@ -1607,8 +1622,7 @@ mod tests {
         let builder = Client::builder(&endpoint)
             .group("staging")
             .unwrap()
-            .api_secret(api_secret)
-            .unwrap();
+            .api_secret(api_secret);
 
         assert_eq!(builder.group, Some("staging".to_string()));
 
@@ -1721,7 +1735,6 @@ mod tests {
         Client::builder(&endpoint)
             .disable_metrics_interval()
             .api_secret(api_secret)
-            .unwrap()
             .build()
             .await
             .unwrap()
@@ -1859,7 +1872,6 @@ mod tests {
             .attributes(full)
             .unwrap()
             .api_secret(api_secret)
-            .unwrap()
             .build()
             .await
             .unwrap();

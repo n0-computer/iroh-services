@@ -4,58 +4,99 @@
 //! for the on-disk format.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use n0_error::{AnyError, StackResultExt, StdResultExt, bail_any, ensure_any};
+use n0_error::{bail, e, ensure, stack_error};
 
 const MAGIC: &[u8] = b"openssh-key-v1\0";
 const PEM_BEGIN: &str = "-----BEGIN OPENSSH PRIVATE KEY-----";
 const PEM_END: &str = "-----END OPENSSH PRIVATE KEY-----";
 
+/// Error returned when a PEM string is not an unencrypted OpenSSH ed25519
+/// private key.
+#[stack_error(derive, add_meta)]
+#[error("invalid OpenSSH key: {reason}")]
+pub struct OpenSshKeyError {
+    reason: &'static str,
+}
+
 /// Parse an unencrypted OpenSSH ed25519 private key (PEM-encoded) and return
 /// the 32-byte ed25519 seed.
-pub(crate) fn parse_ed25519_private_key(pem: &str) -> Result<[u8; 32], AnyError> {
-    let begin = pem.find(PEM_BEGIN).context("missing OpenSSH PEM header")?;
+pub(crate) fn parse_ed25519_private_key(pem: &str) -> Result<[u8; 32], OpenSshKeyError> {
+    let Some(begin) = pem.find(PEM_BEGIN) else {
+        bail!(OpenSshKeyError {
+            reason: "missing PEM header"
+        });
+    };
     let after_header = begin + PEM_BEGIN.len();
-    let end_offset = pem[after_header..]
-        .find(PEM_END)
-        .context("missing OpenSSH PEM footer")?;
+    let Some(end_offset) = pem[after_header..].find(PEM_END) else {
+        bail!(OpenSshKeyError {
+            reason: "missing PEM footer"
+        });
+    };
     let body: String = pem[after_header..after_header + end_offset]
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect();
-    let bytes = STANDARD
-        .decode(body.as_bytes())
-        .std_context("invalid base64 in OpenSSH key")?;
+    let bytes = STANDARD.decode(body.as_bytes()).map_err(|_| {
+        e!(OpenSshKeyError {
+            reason: "invalid base64"
+        })
+    })?;
 
     let mut r = Reader::new(&bytes);
-    ensure_any!(r.take(MAGIC.len())? == MAGIC, "not an OpenSSH v1 key");
+    ensure!(
+        r.take(MAGIC.len())? == MAGIC,
+        OpenSshKeyError {
+            reason: "not an OpenSSH v1 key"
+        }
+    );
     let cipher = r.string()?;
-    ensure_any!(
+    ensure!(
         cipher == b"none",
-        "encrypted OpenSSH keys are not supported"
+        OpenSshKeyError {
+            reason: "encrypted keys are not supported"
+        }
     );
     let kdf = r.string()?;
-    ensure_any!(kdf == b"none", "OpenSSH key has unexpected kdf");
+    ensure!(
+        kdf == b"none",
+        OpenSshKeyError {
+            reason: "unexpected kdf"
+        }
+    );
     let _kdf_options = r.string()?;
     let nkeys = r.u32()?;
-    ensure_any!(nkeys == 1, "expected exactly one OpenSSH key, got {nkeys}");
+    ensure!(
+        nkeys == 1,
+        OpenSshKeyError {
+            reason: "expected exactly one key"
+        }
+    );
     let _public_key = r.string()?;
     let private_section = r.string()?;
 
     let mut r = Reader::new(private_section);
     let c1 = r.u32()?;
     let c2 = r.u32()?;
-    ensure_any!(c1 == c2, "OpenSSH checkint mismatch (key may be encrypted)");
+    ensure!(
+        c1 == c2,
+        OpenSshKeyError {
+            reason: "checkint mismatch (key may be encrypted)"
+        }
+    );
     let keytype = r.string()?;
-    ensure_any!(
+    ensure!(
         keytype == b"ssh-ed25519",
-        "only ed25519 OpenSSH keys are supported"
+        OpenSshKeyError {
+            reason: "only ed25519 keys are supported"
+        }
     );
     let _public = r.string()?;
     let private = r.string()?;
-    ensure_any!(
+    ensure!(
         private.len() == 64,
-        "unexpected ed25519 private key length: {}",
-        private.len()
+        OpenSshKeyError {
+            reason: "unexpected ed25519 private key length"
+        }
     );
 
     let mut seed = [0u8; 32];
@@ -72,21 +113,23 @@ impl<'a> Reader<'a> {
         Self { buf }
     }
 
-    fn take(&mut self, n: usize) -> Result<&'a [u8], AnyError> {
+    fn take(&mut self, n: usize) -> Result<&'a [u8], OpenSshKeyError> {
         if self.buf.len() < n {
-            bail_any!("truncated OpenSSH key");
+            bail!(OpenSshKeyError {
+                reason: "truncated key"
+            });
         }
         let (head, tail) = self.buf.split_at(n);
         self.buf = tail;
         Ok(head)
     }
 
-    fn u32(&mut self) -> Result<u32, AnyError> {
+    fn u32(&mut self) -> Result<u32, OpenSshKeyError> {
         let b = self.take(4)?;
         Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
     }
 
-    fn string(&mut self) -> Result<&'a [u8], AnyError> {
+    fn string(&mut self) -> Result<&'a [u8], OpenSshKeyError> {
         let len = self.u32()? as usize;
         self.take(len)
     }

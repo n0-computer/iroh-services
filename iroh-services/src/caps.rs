@@ -2,11 +2,12 @@ use iroh::{EndpointId, SecretKey};
 use iroh_services_proto::caps::{
     Caps as ProtoCaps, NetDiagnosticsCap as ProtoNetDiagnosticsCap, RelayCap as ProtoRelayCap,
 };
-use n0_error::AnyError;
 use n0_future::time::Duration;
 use rcan::{Expires, Rcan};
 
 use crate::ApiToken;
+#[cfg(not(wasm_browser))]
+pub use crate::openssh::OpenSshKeyError;
 
 /// Capabilities accepted by iroh-services.
 ///
@@ -42,7 +43,7 @@ pub fn create_api_token_from_openssh_pem(
     local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<ApiToken, AnyError> {
+) -> Result<ApiToken, OpenSshKeyError> {
     let seed = crate::openssh::parse_ed25519_private_key(pem)?;
     let issuer = ed25519_dalek::SigningKey::from_bytes(&seed);
     let audience = local_id.as_verifying_key();
@@ -59,12 +60,12 @@ pub fn create_grant_token(
     remote_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<ApiToken, AnyError> {
+) -> ApiToken {
     let issuer = ed25519_dalek::SigningKey::from_bytes(&local_secret.to_bytes());
     let audience = remote_id.as_verifying_key();
     let can =
         Rcan::issuing_builder(&issuer, audience, capability.0).sign(Expires::valid_for(max_age));
-    Ok(ApiToken::new(can))
+    ApiToken::new(can)
 }
 
 /// Create an rcan token for the api access from an iroh secret key
@@ -73,10 +74,10 @@ pub fn create_api_token_from_secret_key(
     local_id: EndpointId,
     max_age: Duration,
     capability: Caps,
-) -> Result<ApiToken, AnyError> {
+) -> ApiToken {
     let issuer = ed25519_dalek::SigningKey::from_bytes(&private_key.to_bytes());
     let audience = local_id.as_verifying_key();
     let can =
         Rcan::issuing_builder(&issuer, audience, capability.0).sign(Expires::valid_for(max_age));
-    Ok(ApiToken::new(can))
+    ApiToken::new(can)
 }

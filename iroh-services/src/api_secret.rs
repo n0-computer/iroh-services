@@ -7,11 +7,25 @@ use std::{
 
 use iroh::{EndpointAddr, EndpointId, SecretKey, TransportAddr};
 use iroh_tickets::{ParseError, Ticket};
-use n0_error::{AnyError, StdResultExt, anyerr};
+use n0_error::{e, stack_error};
 use serde::{Deserialize, Serialize};
 
 /// The environment variable name this crate checks in builders for an API secret.
 pub const API_SECRET_ENV_VAR_NAME: &str = "IROH_SERVICES_API_SECRET";
+
+/// Error returned by [`ApiSecret::from_env_var`].
+#[stack_error(derive, add_meta)]
+#[non_exhaustive]
+pub enum FromEnvError {
+    #[error("{env_var} environment variable is not set")]
+    NotSet { env_var: String },
+    #[error("{env_var} environment variable is set but empty")]
+    Empty { env_var: String },
+    #[error("{env_var} environment variable is not valid unicode")]
+    NotUnicode { env_var: String },
+    #[error("{env_var} environment variable is not a valid api secret")]
+    Invalid { env_var: String, source: ParseError },
+}
 
 /// The secret material used to connect your services.iroh.computer project. The
 /// value of these should be treated like any other API key: guard them carefully.
@@ -94,17 +108,16 @@ impl ApiSecret {
     }
 
     /// Read an Api Secret from a given environment variable
-    pub fn from_env_var(env_var: &str) -> Result<Self, AnyError> {
-        match std::env::var(env_var) {
+    pub fn from_env_var(env_var: &str) -> Result<Self, FromEnvError> {
+        let env_var = env_var.to_string();
+        match std::env::var(&env_var) {
             Ok(ticket_string) if ticket_string.is_empty() => {
-                Err(anyerr!("{env_var} environment variable is set but empty"))
+                Err(e!(FromEnvError::Empty { env_var }))
             }
             Ok(ticket_string) => Self::from_str(&ticket_string)
-                .std_context(format!("invalid api secret at env var {env_var}")),
-            Err(VarError::NotPresent) => Err(anyerr!("{env_var} environment variable is not set")),
-            Err(VarError::NotUnicode(e)) => Err(anyerr!(
-                "{env_var} environment variable is not valid unicode: {e:?}"
-            )),
+                .map_err(|source| e!(FromEnvError::Invalid { env_var }, source)),
+            Err(VarError::NotPresent) => Err(e!(FromEnvError::NotSet { env_var })),
+            Err(VarError::NotUnicode(_)) => Err(e!(FromEnvError::NotUnicode { env_var })),
         }
     }
 
