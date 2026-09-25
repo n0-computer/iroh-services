@@ -427,6 +427,7 @@ pub const CLIENT_NAME_MAX_LENGTH: usize = 128;
 
 /// Error returned when an endpoint name fails validation.
 #[stack_error(derive, add_meta)]
+#[non_exhaustive]
 pub enum ValidateNameError {
     #[error("Name is too long (must be no more than {CLIENT_NAME_MAX_LENGTH} bytes).")]
     TooLong,
@@ -446,6 +447,7 @@ fn validate_name(name: &str) -> Result<(), ValidateNameError> {
 
 /// Error returned when an attributes map fails validation.
 #[stack_error(derive, add_meta)]
+#[non_exhaustive]
 pub enum ValidateAttributesError {
     #[error("Too many attributes (must be no more than {ATTRIBUTES_MAX_COUNT}).")]
     TooManyEntries,
