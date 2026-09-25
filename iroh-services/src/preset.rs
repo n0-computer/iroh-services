@@ -11,7 +11,7 @@
 //! ```no_run
 //! use iroh::Endpoint;
 //!
-//! async fn run() -> n0_error::Result<()> {
+//! async fn run() -> anyhow::Result<()> {
 //!     let preset = iroh_services::preset()
 //!         .relays(["https://us-east1.project_username.iroh.link"])?
 //!         .api_secret_from_env()?
@@ -121,7 +121,7 @@ pub struct PresetBuilder {
 /// `N0` plus a project access token for the public relays:
 ///
 /// ```no_run
-/// # async fn run() -> n0_error::Result<()> {
+/// # async fn run() -> anyhow::Result<()> {
 /// let preset = iroh_services::preset().api_secret_from_env()?.build()?;
 /// let endpoint = iroh::Endpoint::bind(preset.clone()).await?;
 /// // reuses the preset's api secret, no need to pass it twice
@@ -149,7 +149,7 @@ impl PresetBuilder {
     /// Set relay URLs. This method accepts any iterator of &str, allowing the
     /// common pattern:
     /// ```no_run
-    /// fn build() -> n0_error::Result<()> {
+    /// fn build() -> anyhow::Result<()> {
     ///     let _preset = iroh_services::preset()
     ///         .relays([
     ///             "https://us-east1.project_username.iroh.link",

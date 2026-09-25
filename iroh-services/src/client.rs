@@ -47,7 +47,7 @@ use crate::{
 /// use iroh::{Endpoint, endpoint::presets};
 /// use iroh_services::Client;
 ///
-/// async fn build_client() -> n0_error::Result<()> {
+/// async fn build_client() -> anyhow::Result<()> {
 ///     let endpoint = Endpoint::bind(presets::N0).await?;
 ///
 ///     // needs IROH_SERVICES_API_SECRET set to an environment variable
@@ -223,7 +223,7 @@ impl ClientBuilder {
     /// ```no_run
     /// # use iroh::{Endpoint, endpoint::presets};
     /// # use iroh_services::Client;
-    /// # async fn example(endpoint: &Endpoint) -> n0_error::Result<()> {
+    /// # async fn example(endpoint: &Endpoint) -> anyhow::Result<()> {
     /// let _ = Client::builder(endpoint).attributes([("env", "prod"), ("region", "us-west")])?;
     /// # Ok(()) }
     /// ```
@@ -577,7 +577,7 @@ impl Client {
     ///
     /// ```no_run
     /// # use iroh_services::Client;
-    /// # async fn example(client: Client) -> n0_error::Result<()> {
+    /// # async fn example(client: Client) -> anyhow::Result<()> {
     /// client
     ///     .set_attributes([("env", "prod"), ("region", "us-west")])
     ///     .await?;

@@ -50,6 +50,7 @@ built = { version = "0.8", features = ["cargo-lock"] }
 cfg_aliases = "0.2.1"
 
 [dev-dependencies]
+anyhow = "1"
 rand = { version = "0.10", features = ["chacha"] }
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dev-dependencies]
