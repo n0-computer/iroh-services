@@ -40,7 +40,7 @@ jobs:
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
           # Match the version of wasm-bindgen used in Cargo.lock
-          tool: wasm-bindgen-cli@0.2.125
+          tool: wasm-bindgen-cli@0.2.129
 
       - name: Run integration test in wasm
         run: cargo test --locked --test integration --target=wasm32-unknown-unknown
