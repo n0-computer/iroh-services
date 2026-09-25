@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fmt, str::FromStr};
 
-use anyhow::{Context, Result, bail};
+use n0_error::{e, stack_error};
 use rcan::Capability;
 use serde::{Deserialize, Serialize};
 
@@ -81,22 +81,44 @@ pub enum Cap {
     NetDiagnostics(NetDiagnosticsCap),
 }
 
-impl FromStr for Cap {
-    type Err = anyhow::Error;
+/// Error returned when a string is not a valid capability.
+#[stack_error(derive, add_meta)]
+#[error("invalid capability {input:?}")]
+pub struct ParseCapError {
+    input: String,
+}
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        if s == "all" {
-            Ok(Self::All)
-        } else if let Some((domain, inner)) = s.split_once(":") {
-            Ok(match domain {
-                "metrics" => Self::Metrics(MetricsCap::from_str(inner)?),
-                "relay" => Self::Relay(RelayCap::from_str(inner)?),
-                "net-diagnostics" => Self::NetDiagnostics(NetDiagnosticsCap::from_str(inner)?),
-                _ => bail!("invalid cap domain"),
+impl ParseCapError {
+    /// Returns the string that failed to parse.
+    pub fn input(&self) -> &str {
+        &self.input
+    }
+}
+
+impl FromStr for Cap {
+    type Err = ParseCapError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let invalid = || {
+            e!(ParseCapError {
+                input: s.to_string()
             })
-        } else {
-            Err(anyhow::anyhow!("invalid cap string"))
+        };
+        if s == "all" {
+            return Ok(Self::All);
         }
+        let Some((domain, inner)) = s.split_once(":") else {
+            return Err(invalid());
+        };
+        let cap = match domain {
+            "metrics" => Self::Metrics(MetricsCap::from_str(inner).map_err(|_| invalid())?),
+            "relay" => Self::Relay(RelayCap::from_str(inner).map_err(|_| invalid())?),
+            "net-diagnostics" => {
+                Self::NetDiagnostics(NetDiagnosticsCap::from_str(inner).map_err(|_| invalid())?)
+            }
+            _ => return Err(invalid()),
+        };
+        Ok(cap)
     }
 }
 
@@ -143,7 +165,7 @@ impl Caps {
         Self::V0(set)
     }
 
-    pub fn from_strs<'a>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self> {
+    pub fn from_strs<'a>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self, ParseCapError> {
         Ok(Self::V0(CapSet::from_strs(strs)?))
     }
 
@@ -257,14 +279,17 @@ impl<C: Capability + Ord> CapSet<C> {
         self.0.insert(cap.into())
     }
 
-    pub fn from_strs<'a, E>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self>
+    pub fn from_strs<'a>(strs: impl IntoIterator<Item = &'a str>) -> Result<Self, ParseCapError>
     where
-        C: FromStr<Err = E>,
-        Result<C, E>: anyhow::Context<C, E>,
+        C: FromStr,
     {
         let mut caps = Self::default();
         for s in strs {
-            let cap = C::from_str(s).with_context(|| format!("Unknown capability: {s}"))?;
+            let cap = C::from_str(s).map_err(|_| {
+                e!(ParseCapError {
+                    input: s.to_string()
+                })
+            })?;
             caps.insert(cap);
         }
         Ok(caps)

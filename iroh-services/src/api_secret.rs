@@ -1,17 +1,27 @@
 use std::{
     collections::BTreeSet,
-    env::VarError,
     fmt::{self, Display},
     str::FromStr,
 };
 
-use anyhow::{Context, anyhow};
 use iroh::{EndpointAddr, EndpointId, SecretKey, TransportAddr};
 use iroh_tickets::{ParseError, Ticket};
+use n0_error::{e, stack_error};
 use serde::{Deserialize, Serialize};
 
 /// The environment variable name this crate checks in builders for an API secret.
 pub const API_SECRET_ENV_VAR_NAME: &str = "IROH_SERVICES_API_SECRET";
+
+/// Error returned by [`ApiSecret::from_env_var`].
+#[stack_error(derive, add_meta)]
+pub enum FromEnvError {
+    /// The environment variable is not set, or set to the empty string.
+    #[error("environment variable is not set")]
+    NotSet,
+    /// The environment variable is set but does not hold an api secret.
+    #[error("environment variable does not hold a valid api secret")]
+    Invalid { source: ParseError },
+}
 
 /// The secret material used to connect your services.iroh.computer project. The
 /// value of these should be treated like any other API key: guard them carefully.
@@ -94,19 +104,14 @@ impl ApiSecret {
     }
 
     /// Read an Api Secret from a given environment variable
-    pub fn from_env_var(env_var: &str) -> anyhow::Result<Self> {
-        match std::env::var(env_var) {
-            Ok(ticket_string) if ticket_string.is_empty() => {
-                Err(anyhow!("{env_var} environment variable is set but empty"))
-            }
-            Ok(ticket_string) => Self::from_str(&ticket_string)
-                .context(format!("invalid api secret at env var {env_var}")),
-            Err(VarError::NotPresent) => Err(anyhow!("{env_var} environment variable is not set")),
-            Err(VarError::NotUnicode(e)) => Err(anyhow!(
-                "{env_var} environment variable is not valid unicode: {:?}",
-                e
-            )),
-        }
+    pub fn from_env_var(env_var: &str) -> Result<Self, FromEnvError> {
+        let value = std::env::var_os(env_var).filter(|value| !value.is_empty());
+        let Some(value) = value else {
+            return Err(e!(FromEnvError::NotSet));
+        };
+        // A value that is not valid unicode cannot be a ticket either; the
+        // lossy conversion lets the parser report it as such.
+        Self::from_str(&value.to_string_lossy()).map_err(|source| e!(FromEnvError::Invalid, source))
     }
 
     /// The [`EndpointAddr`] of the provider for this ticket.

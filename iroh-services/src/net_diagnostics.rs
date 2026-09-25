@@ -58,14 +58,18 @@ impl PortMapProbe {
 pub mod checks {
     use std::net::SocketAddr;
 
-    use anyhow::Result;
     use iroh::{Endpoint, Watcher};
+    #[cfg(not(wasm_browser))]
+    use n0_error::e;
     use n0_future::time::Duration;
 
     use super::*;
 
     /// Run full network diagnostics on an existing endpoint. 10s timeout.
-    pub async fn run_diagnostics(endpoint: &Endpoint) -> Result<DiagnosticsReport> {
+    ///
+    /// Every probe has a timeout and a fallback, so this always produces a
+    /// report; probes that did not complete leave their field empty.
+    pub async fn run_diagnostics(endpoint: &Endpoint) -> DiagnosticsReport {
         run_diagnostics_with_timeout(endpoint, Duration::from_secs(10)).await
     }
 
@@ -73,7 +77,7 @@ pub mod checks {
     async fn run_diagnostics_with_timeout(
         endpoint: &Endpoint,
         timeout: Duration,
-    ) -> Result<DiagnosticsReport> {
+    ) -> DiagnosticsReport {
         let endpoint_id = endpoint.id();
 
         // 1. Wait for relay connection
@@ -104,7 +108,7 @@ pub mod checks {
             match n0_future::time::timeout(Duration::from_secs(5), probe_port_mapping()).await {
                 Ok(Ok(p)) => Some(p),
                 Ok(Err(e)) => {
-                    tracing::warn!("portmap probe failed: {e}");
+                    tracing::warn!("portmap probe failed: {e:#}");
                     None
                 }
                 Err(_) => {
@@ -122,18 +126,18 @@ pub mod checks {
             nat_pmp: false,
         });
 
-        Ok(DiagnosticsReport {
+        DiagnosticsReport {
             endpoint_id,
             net_report,
             direct_addrs,
             portmap_probe,
             iroh_version: crate::IROH_VERSION.to_string(),
             iroh_services_version: crate::IROH_SERVICES_VERSION.to_string(),
-        })
+        }
     }
 
     #[cfg(not(wasm_browser))]
-    async fn probe_port_mapping() -> Result<PortMapProbe> {
+    async fn probe_port_mapping() -> Result<PortMapProbe, portmapper::ProbeError> {
         let config = portmapper::Config {
             enable_upnp: true,
             enable_pcp: true,
@@ -142,7 +146,11 @@ pub mod checks {
         };
         let client = portmapper::Client::new(config);
         let probe_rx = client.probe();
-        let probe = probe_rx.await?.map_err(|e| anyhow::anyhow!(e))?;
+        // The service dropping the reply channel without answering is the
+        // same failure the probe itself reports as a closed channel.
+        let probe = probe_rx
+            .await
+            .map_err(|_| e!(portmapper::ProbeError::ChannelClosed))??;
         Ok(PortMapProbe {
             upnp: probe.upnp,
             pcp: probe.pcp,
@@ -163,7 +171,7 @@ mod tests {
             .bind()
             .await
             .unwrap();
-        run_diagnostics(&endpoint).await.unwrap();
+        run_diagnostics(&endpoint).await;
         endpoint.close().await;
     }
 }
