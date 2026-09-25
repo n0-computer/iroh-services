@@ -379,7 +379,7 @@ pub enum BuildError {
         #[error(from)]
         source: ValidateAttributesError,
     },
-    #[error("Failed to read the api secret from the environment")]
+    #[error("Failed to read the api secret from {API_SECRET_ENV_VAR_NAME}")]
     ApiSecretEnv {
         #[error(from)]
         source: FromEnvError,

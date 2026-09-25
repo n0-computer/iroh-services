@@ -46,7 +46,7 @@ pub enum PresetError {
         url: String,
         source: RelayUrlParseError,
     },
-    #[error("Failed to read the api secret from the environment")]
+    #[error("Failed to read the api secret from {API_SECRET_ENV_VAR_NAME}")]
     ApiSecretEnv {
         #[error(from)]
         source: FromEnvError,
