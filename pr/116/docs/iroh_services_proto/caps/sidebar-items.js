@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Cap","Caps","MetricsCap","NetDiagnosticsCap","RelayCap"],"struct":["CapSet"]};
+window.SIDEBAR_ITEMS = {"enum":["Cap","Caps","MetricsCap","NetDiagnosticsCap","RelayCap"],"struct":["CapSet","ParseCapError"]};
