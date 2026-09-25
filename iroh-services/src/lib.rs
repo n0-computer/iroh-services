@@ -57,7 +57,6 @@ pub static IROH_VERSION: std::sync::LazyLock<&str> = std::sync::LazyLock::new(||
 
 pub use client_host::ClientHost;
 pub use iroh_metrics::Registry;
-pub use n0_error;
 pub use token::ApiToken;
 
 /// The main ALPN for connecting from the client to the cloud node.
