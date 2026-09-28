@@ -5,7 +5,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use anyhow::Result;
 use iroh::{
     Endpoint, EndpointAddr, EndpointId,
     endpoint::{ConnectError, Connection},
@@ -19,7 +18,7 @@ use iroh_services_proto::{
 };
 use irpc::{Channels, RpcMessage, WithChannels, channel::none::NoReceiver};
 use irpc_iroh::IrohRemoteConnection;
-use n0_error::StackResultExt;
+use n0_error::{AnyError, e, stack_error};
 use n0_future::{
     task::{self, AbortOnDropHandle},
     time::{self, Duration},
@@ -31,9 +30,11 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
+#[cfg(not(wasm_browser))]
+use crate::caps::OpenSshKeyError;
 use crate::{
     ALPN,
-    api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret},
+    api_secret::{API_SECRET_ENV_VAR_NAME, ApiSecret, FromEnvError},
     caps::{Caps, DEFAULT_CAP_EXPIRY},
     net_diagnostics::{DiagnosticsReport, checks::run_diagnostics},
 };
@@ -92,16 +93,19 @@ pub struct Pong {
 }
 
 /// An error returned by the remote iroh-services endpoint.
-#[derive(Clone, Serialize, Deserialize, thiserror::Error, Debug)]
+// No `add_meta` here: this error crosses the wire, and `n0_error::Meta` is not
+// serializable.
+#[stack_error(derive)]
+#[derive(Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum RemoteError {
     #[error("Missing capability: {}", _0.0.to_strings().join(", "))]
     MissingCapability(#[serde(with = "missing_capability_serde")] Caps),
-    #[error("Unauthorized: {0}")]
+    #[error("Unauthorized: {_0}")]
     AuthError(String),
     #[error("Internal server error")]
     InternalServerError,
-    #[error("Invalid input: {0}")]
+    #[error("Invalid input: {_0}")]
     InvalidInput(String),
     #[error("Rate limit exceeded")]
     RateLimited,
@@ -191,9 +195,9 @@ impl ClientBuilder {
     /// the client authenticates; a failure to send it at that point is logged at
     /// warn level rather than returned; use [`Client::set_name`] to set it later
     /// with explicit error handling.
-    pub fn name(mut self, name: impl Into<String>) -> Result<Self> {
+    pub fn name(mut self, name: impl Into<String>) -> Result<Self, BuildError> {
         let name = name.into();
-        validate_name(&name).map_err(BuildError::InvalidName)?;
+        validate_name(&name).map_err(|source| e!(BuildError::InvalidName, source))?;
         self.name = Some(name);
         Ok(self)
     }
@@ -206,9 +210,9 @@ impl ClientBuilder {
     /// failure to send it at that point is logged at warn level rather than
     /// returned; use [`Client::set_group`] to set it later with explicit error
     /// handling.
-    pub fn group(mut self, group: impl Into<String>) -> Result<Self> {
+    pub fn group(mut self, group: impl Into<String>) -> Result<Self, BuildError> {
         let group = group.into();
-        validate_name(&group).map_err(BuildError::InvalidGroup)?;
+        validate_name(&group).map_err(|source| e!(BuildError::InvalidGroup, source))?;
         self.group = Some(group);
         Ok(self)
     }
@@ -230,7 +234,7 @@ impl ClientBuilder {
     /// authenticates; a failure to send them at that point is logged at warn
     /// level rather than returned; use [`Client::set_attributes`] to set them
     /// later with explicit error handling.
-    pub fn attributes<I, K, V>(mut self, attrs: I) -> Result<Self>
+    pub fn attributes<I, K, V>(mut self, attrs: I) -> Result<Self, BuildError>
     where
         I: IntoIterator<Item = (K, V)>,
         K: Into<String>,
@@ -240,21 +244,22 @@ impl ClientBuilder {
             .into_iter()
             .map(|(k, v)| (k.into(), v.into()))
             .collect();
-        validate_attributes(&collected).map_err(BuildError::InvalidAttributes)?;
+        validate_attributes(&collected)
+            .map_err(|source| e!(BuildError::InvalidAttributes, source))?;
         self.attributes = Some(collected);
         Ok(self)
     }
 
     /// Check IROH_SERVICES_API_SECRET environment variable for a valid API secret
-    pub fn api_secret_from_env(self) -> Result<Self> {
+    pub fn api_secret_from_env(self) -> Result<Self, BuildError> {
         let ticket = ApiSecret::from_env_var(API_SECRET_ENV_VAR_NAME)?;
-        self.api_secret(ticket)
+        Ok(self.api_secret(ticket))
     }
 
     /// set client API secret from an encoded string
-    pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self> {
-        let key = ApiSecret::from_str(secret_key).context("invalid iroh services api secret")?;
-        self.api_secret(key)
+    pub fn api_secret_from_str(self, secret_key: &str) -> Result<Self, BuildError> {
+        let key = ApiSecret::from_str(secret_key)?;
+        Ok(self.api_secret(key))
     }
 
     /// Use a shared secret & remote iroh-services endpoint ID contained within a ticket
@@ -263,32 +268,37 @@ impl ClientBuilder {
     ///
     /// API secrets include remote details within them, and will set both the
     /// remote and capability token values on the builder
-    pub fn api_secret(mut self, ticket: ApiSecret) -> Result<Self> {
+    pub fn api_secret(mut self, ticket: ApiSecret) -> Self {
         let local_id = self.endpoint.id();
         let token = crate::caps::create_api_token_from_secret_key(
             ticket.secret,
             local_id,
             self.cap_expiry,
             Caps::client(),
-        )?;
+        );
 
         self.remote = Some(ticket.remote);
         self.cap.replace(token.into_rcan());
-        Ok(self)
+        self
     }
 
     /// Loads the private ssh key from the given path, and creates the needed capability.
     ///
     /// The file must contain an unencrypted PEM-encoded OpenSSH ed25519 private key.
     #[cfg(not(wasm_browser))]
-    pub async fn ssh_key_from_file<P: AsRef<std::path::Path>>(self, path: P) -> Result<Self> {
-        let file_content = tokio::fs::read_to_string(path).await?;
+    pub async fn ssh_key_from_file<P: AsRef<std::path::Path>>(
+        self,
+        path: P,
+    ) -> Result<Self, BuildError> {
+        let file_content = tokio::fs::read_to_string(path)
+            .await
+            .map_err(|source| e!(BuildError::SshKeyFile, source))?;
         self.ssh_key(&file_content)
     }
 
     /// Creates the capability from the provided PEM-encoded OpenSSH ed25519 private key.
     #[cfg(not(wasm_browser))]
-    pub fn ssh_key(mut self, pem: &str) -> Result<Self> {
+    pub fn ssh_key(mut self, pem: &str) -> Result<Self, BuildError> {
         let local_id = self.endpoint.id();
         let token = crate::caps::create_api_token_from_openssh_pem(
             pem,
@@ -312,8 +322,8 @@ impl ClientBuilder {
     #[must_use = "dropping the client will silently cancel all client tasks"]
     pub async fn build(self) -> Result<Client, BuildError> {
         debug!("starting iroh-services client");
-        let remote = self.remote.ok_or(BuildError::MissingRemote)?;
-        let capabilities = self.cap.ok_or(BuildError::MissingCapability)?;
+        let remote = self.remote.ok_or_else(|| e!(BuildError::MissingRemote))?;
+        let capabilities = self.cap.ok_or_else(|| e!(BuildError::MissingCapability))?;
 
         let registry = Arc::new(RwLock::new(self.registry));
         let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -343,7 +353,7 @@ impl ClientBuilder {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[stack_error(derive, add_meta)]
 #[non_exhaustive]
 pub enum BuildError {
     #[error("Missing remote endpoint to dial")]
@@ -352,14 +362,45 @@ pub enum BuildError {
     MissingCapability,
     #[error("Unauthorized")]
     Unauthorized,
-    #[error("Remote error: {0}")]
-    Remote(#[from] RemoteError),
-    #[error("Invalid endpoint name: {0}")]
-    InvalidName(#[from] ValidateNameError),
-    #[error("Invalid endpoint group: {0}")]
-    InvalidGroup(ValidateNameError),
-    #[error("Invalid endpoint attributes: {0}")]
-    InvalidAttributes(#[from] ValidateAttributesError),
+    #[error("Remote error")]
+    Remote {
+        #[error(from)]
+        source: RemoteError,
+    },
+    #[error("Invalid endpoint name")]
+    InvalidName {
+        #[error(from)]
+        source: ValidateNameError,
+    },
+    #[error("Invalid endpoint group")]
+    InvalidGroup { source: ValidateNameError },
+    #[error("Invalid endpoint attributes")]
+    InvalidAttributes {
+        #[error(from)]
+        source: ValidateAttributesError,
+    },
+    #[error("Failed to read the api secret from {API_SECRET_ENV_VAR_NAME}")]
+    ApiSecretEnv {
+        #[error(from)]
+        source: FromEnvError,
+    },
+    #[error("Invalid api secret")]
+    ApiSecretParse {
+        #[error(from)]
+        source: iroh_tickets::ParseError,
+    },
+    #[cfg(not(wasm_browser))]
+    #[error("Invalid OpenSSH key")]
+    SshKey {
+        #[error(from)]
+        source: OpenSshKeyError,
+    },
+    #[cfg(not(wasm_browser))]
+    #[error("Failed to read the OpenSSH key file")]
+    SshKeyFile {
+        #[error(std_err)]
+        source: std::io::Error,
+    },
 }
 
 /// How long [`Client::shutdown`] lets a request already in flight finish.
@@ -385,7 +426,8 @@ pub const CLIENT_NAME_MIN_LENGTH: usize = 2;
 pub const CLIENT_NAME_MAX_LENGTH: usize = 128;
 
 /// Error returned when an endpoint name fails validation.
-#[derive(Debug, thiserror::Error)]
+#[stack_error(derive, add_meta)]
+#[non_exhaustive]
 pub enum ValidateNameError {
     #[error("Name is too long (must be no more than {CLIENT_NAME_MAX_LENGTH} bytes).")]
     TooLong,
@@ -395,68 +437,84 @@ pub enum ValidateNameError {
 
 fn validate_name(name: &str) -> Result<(), ValidateNameError> {
     if name.len() < CLIENT_NAME_MIN_LENGTH {
-        Err(ValidateNameError::TooShort)
+        Err(e!(ValidateNameError::TooShort))
     } else if name.len() > CLIENT_NAME_MAX_LENGTH {
-        Err(ValidateNameError::TooLong)
+        Err(e!(ValidateNameError::TooLong))
     } else {
         Ok(())
     }
 }
 
 /// Error returned when an attributes map fails validation.
-#[derive(Debug, thiserror::Error)]
+#[stack_error(derive, add_meta)]
+#[non_exhaustive]
 pub enum ValidateAttributesError {
     #[error("Too many attributes (must be no more than {ATTRIBUTES_MAX_COUNT}).")]
     TooManyEntries,
-    #[error("Invalid attribute key: {0}")]
-    InvalidKey(#[from] ValidateNameError),
+    #[error("Invalid attribute key")]
+    InvalidKey {
+        #[error(from)]
+        source: ValidateNameError,
+    },
     #[error("Attribute value too long (must be no more than {ATTRIBUTE_VALUE_MAX_LENGTH} bytes).")]
     ValueTooLong,
 }
 
 fn validate_attributes(attrs: &BTreeMap<String, String>) -> Result<(), ValidateAttributesError> {
     if attrs.len() > ATTRIBUTES_MAX_COUNT {
-        return Err(ValidateAttributesError::TooManyEntries);
+        return Err(e!(ValidateAttributesError::TooManyEntries));
     }
     for (k, v) in attrs {
         validate_name(k)?;
         if v.len() > ATTRIBUTE_VALUE_MAX_LENGTH {
-            return Err(ValidateAttributesError::ValueTooLong);
+            return Err(e!(ValidateAttributesError::ValueTooLong));
         }
     }
     Ok(())
 }
 
-#[derive(thiserror::Error, Debug)]
+#[stack_error(derive, add_meta)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("Invalid endpoint name: {0}")]
-    InvalidName(#[from] ValidateNameError),
-    #[error("Invalid endpoint group: {0}")]
-    InvalidGroup(ValidateNameError),
-    #[error("Invalid endpoint attributes: {0}")]
-    InvalidAttributes(#[from] ValidateAttributesError),
-    #[error("Remote error: {0}")]
-    Remote(#[from] RemoteError),
-    #[error("Connection error: {0}")]
-    Connect(#[from] ConnectError),
-    #[error("Rpc error: {0}")]
-    Rpc(anyhow::Error),
-    #[error(transparent)]
-    Other(anyhow::Error),
+    #[error("Invalid endpoint name")]
+    InvalidName {
+        #[error(from)]
+        source: ValidateNameError,
+    },
+    #[error("Invalid endpoint group")]
+    InvalidGroup { source: ValidateNameError },
+    #[error("Invalid endpoint attributes")]
+    InvalidAttributes {
+        #[error(from)]
+        source: ValidateAttributesError,
+    },
+    #[error("Remote error")]
+    Remote {
+        #[error(from)]
+        source: RemoteError,
+    },
+    #[error("Connection error")]
+    Connect {
+        #[error(from)]
+        source: ConnectError,
+    },
+    #[error("Rpc error")]
+    Rpc { source: AnyError },
     #[error("Local client actor is stopped, cannot send requests")]
     ActorStopped,
 }
 
 impl From<tokio::sync::mpsc::error::SendError<ClientActorMessage>> for Error {
+    #[track_caller]
     fn from(_value: tokio::sync::mpsc::error::SendError<ClientActorMessage>) -> Self {
-        Error::ActorStopped
+        e!(Error::ActorStopped)
     }
 }
 
 impl From<tokio::sync::oneshot::error::RecvError> for Error {
+    #[track_caller]
     fn from(_value: tokio::sync::oneshot::error::RecvError) -> Self {
-        Error::ActorStopped
+        e!(Error::ActorStopped)
     }
 }
 
@@ -503,7 +561,7 @@ impl Client {
     /// A group name must be 2 to 128 bytes of UTF-8.
     pub async fn set_group(&self, group: impl Into<String>) -> Result<(), Error> {
         let group: String = group.into();
-        validate_name(&group).map_err(Error::InvalidGroup)?;
+        validate_name(&group).map_err(|source| e!(Error::InvalidGroup, source))?;
         debug!(%group, "calling set group");
         let (tx, rx) = oneshot::channel();
         self.message_channel
@@ -622,7 +680,6 @@ impl Client {
             DEFAULT_CAP_EXPIRY,
             caps,
         )
-        .map_err(Error::Other)?
         .into_rcan();
 
         let (tx, rx) = oneshot::channel();
@@ -637,9 +694,7 @@ impl Client {
 
     /// run local network status diagnostics, optionally uploading the results
     pub async fn net_diagnostics(&self, send: bool) -> Result<DiagnosticsReport, Error> {
-        let report = run_diagnostics(&self.endpoint)
-            .await
-            .map_err(Error::Other)?;
+        let report = run_diagnostics(&self.endpoint).await;
         if send {
             let (tx, rx) = oneshot::channel();
             self.message_channel
@@ -744,7 +799,7 @@ impl RpcClient {
         irpc.rpc(Auth { caps })
             .await
             .inspect_err(|err| debug!("authorization failed: {err:?}"))
-            .map_err(|err| Error::Remote(RemoteError::AuthError(err.to_string())))?;
+            .map_err(|err| e!(Error::Remote, RemoteError::AuthError(err.to_string())))?;
         Ok(Self { connection, irpc })
     }
 }
@@ -804,7 +859,7 @@ impl ClientActor {
         if clean_shutdown && metrics_enabled && self.is_connected() {
             match time::timeout(SHUTDOWN_FLUSH_TIMEOUT, self.send_metrics()).await {
                 Ok(Ok(())) => trace!("pushed final metrics on shutdown"),
-                Ok(Err(err)) => debug!(%err, "failed to push final metrics on shutdown"),
+                Ok(Err(err)) => debug!("failed to push final metrics on shutdown: {err:#}"),
                 Err(_) => debug!("final metrics push on shutdown timed out"),
             }
         }
@@ -825,19 +880,19 @@ impl ClientActor {
         if let Some(name) = self.name.clone()
             && let Err(err) = self.send_name_endpoint(name).await
         {
-            warn!(err = %err, "failed setting endpoint name on startup");
+            warn!("failed setting endpoint name on startup: {err:#}");
         }
 
         if let Some(group) = self.group.clone()
             && let Err(err) = self.send_set_group(group).await
         {
-            warn!(err = %err, "failed setting endpoint group on startup");
+            warn!("failed setting endpoint group on startup: {err:#}");
         }
 
         if !self.attributes.is_empty()
             && let Err(err) = self.send_set_attributes(self.attributes.clone()).await
         {
-            warn!(err = %err, "failed setting endpoint attributes on startup");
+            warn!("failed setting endpoint attributes on startup: {err:#}");
         }
 
         loop {
@@ -911,7 +966,7 @@ impl ClientActor {
                 } => {
                     trace!("metrics send tick");
                     if let Err(err) = self.send_metrics().await {
-                        debug!("failed to push metrics: {:#?}", err);
+                        debug!("failed to push metrics: {err:#}");
                     }
                 },
             }
@@ -993,8 +1048,8 @@ impl ClientActor {
             self.client = None;
         }
 
-        res.inspect_err(|err| warn!("rpc error: {err}"))
-            .map_err(|error| Error::Rpc(error.into()))
+        res.inspect_err(|err| warn!("rpc error: {err:#}"))
+            .map_err(|error| e!(Error::Rpc, error.into()))
     }
 
     async fn send_ping(&mut self) -> Result<Pong, Error> {
@@ -1090,7 +1145,7 @@ mod tests {
     use iroh_services_proto::{IrohServicesProtocol, Pong, ServicesMessage};
     use irpc::WithChannels;
     use irpc_iroh::read_request;
-    use n0_error::AnyError;
+    use n0_error::{AnyError, bail_any};
     use n0_future::{
         task,
         time::{self, Duration},
@@ -1154,7 +1209,7 @@ mod tests {
             self
         }
 
-        async fn handle_connection(&self, connection: Connection) -> anyhow::Result<()> {
+        async fn handle_connection(&self, connection: Connection) -> Result<(), AnyError> {
             let Some(first_request) = read_request::<IrohServicesProtocol>(&connection).await?
             else {
                 return Ok(());
@@ -1180,7 +1235,7 @@ mod tests {
                 match request {
                     ServicesMessage::Auth(_) => {
                         connection.close(400u32.into(), b"Unexpected auth message");
-                        anyhow::bail!("client re-sent auth on a live connection");
+                        bail_any!("client re-sent auth on a live connection");
                     }
                     ServicesMessage::Ping(WithChannels { inner, tx, .. }) => {
                         time::sleep(self.ping_delay).await;
@@ -1203,7 +1258,7 @@ mod tests {
                     }
                     _ => {
                         connection.close(400u32.into(), b"Unexpected message in test");
-                        anyhow::bail!("unexpected message in test");
+                        bail_any!("unexpected message in test");
                     }
                 }
             }
@@ -1212,10 +1267,9 @@ mod tests {
 
     impl ProtocolHandler for TestServer {
         async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
-            self.handle_connection(connection).await.map_err(|e| {
-                let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
-                AcceptError::from(AnyError::from(boxed))
-            })
+            self.handle_connection(connection)
+                .await
+                .map_err(AcceptError::from)
         }
     }
 
@@ -1237,7 +1291,6 @@ mod tests {
         let api_secret = ApiSecret::new(shared_secret, server_ep.id());
         let builder = Client::builder(&client_ep)
             .api_secret(api_secret)
-            .unwrap()
             .remote(server_ep.addr());
         (router, client_ep, builder)
     }
@@ -1382,7 +1435,6 @@ mod tests {
         let client = Client::builder(&endpoint)
             .disable_metrics_interval()
             .api_secret(api_secret)
-            .unwrap()
             .build()
             .await
             .unwrap();
@@ -1404,7 +1456,6 @@ mod tests {
 
         let client = Client::builder(&endpoint)
             .api_secret(api_secret)
-            .unwrap()
             .build()
             .await
             .unwrap();
@@ -1504,7 +1555,6 @@ mod tests {
 
         let client = Client::builder(&endpoint)
             .api_secret(api_secret)
-            .unwrap()
             // TEST-NET-1, routable but silently dropped, so the dial hangs
             // instead of failing fast the way an address-less remote would.
             .remote(
@@ -1534,8 +1584,7 @@ mod tests {
         let builder = Client::builder(&endpoint)
             .name("my-node 👋")
             .unwrap()
-            .api_secret(api_secret)
-            .unwrap();
+            .api_secret(api_secret);
 
         assert_eq!(builder.name, Some("my-node 👋".to_string()));
 
@@ -1543,8 +1592,11 @@ mod tests {
             panic!("name should fail for strings under 2 bytes");
         };
         assert!(matches!(
-            err.downcast_ref::<BuildError>(),
-            Some(BuildError::InvalidName(ValidateNameError::TooShort))
+            err,
+            BuildError::InvalidName {
+                source: ValidateNameError::TooShort { .. },
+                ..
+            }
         ));
 
         let too_long_name = "👋".repeat(129);
@@ -1552,8 +1604,11 @@ mod tests {
             panic!("name should fail for strings over 128 bytes");
         };
         assert!(matches!(
-            err.downcast_ref::<BuildError>(),
-            Some(BuildError::InvalidName(ValidateNameError::TooLong))
+            err,
+            BuildError::InvalidName {
+                source: ValidateNameError::TooLong { .. },
+                ..
+            }
         ));
     }
 
@@ -1569,8 +1624,7 @@ mod tests {
         let builder = Client::builder(&endpoint)
             .group("staging")
             .unwrap()
-            .api_secret(api_secret)
-            .unwrap();
+            .api_secret(api_secret);
 
         assert_eq!(builder.group, Some("staging".to_string()));
 
@@ -1578,8 +1632,11 @@ mod tests {
             panic!("group should fail for strings under 2 bytes");
         };
         assert!(matches!(
-            err.downcast_ref::<BuildError>(),
-            Some(BuildError::InvalidGroup(ValidateNameError::TooShort))
+            err,
+            BuildError::InvalidGroup {
+                source: ValidateNameError::TooShort { .. },
+                ..
+            }
         ));
 
         let too_long_group = "👋".repeat(129);
@@ -1587,8 +1644,11 @@ mod tests {
             panic!("group should fail for strings over 128 bytes");
         };
         assert!(matches!(
-            err.downcast_ref::<BuildError>(),
-            Some(BuildError::InvalidGroup(ValidateNameError::TooLong))
+            err,
+            BuildError::InvalidGroup {
+                source: ValidateNameError::TooLong { .. },
+                ..
+            }
         ));
     }
 
@@ -1625,10 +1685,11 @@ mod tests {
             panic!("attributes should fail for value over 128 bytes");
         };
         assert!(matches!(
-            err.downcast_ref::<BuildError>(),
-            Some(BuildError::InvalidAttributes(
-                ValidateAttributesError::ValueTooLong
-            ))
+            err,
+            BuildError::InvalidAttributes {
+                source: ValidateAttributesError::ValueTooLong { .. },
+                ..
+            }
         ));
 
         // key under 2 bytes errors
@@ -1636,10 +1697,14 @@ mod tests {
             panic!("attributes should fail for key under 2 bytes");
         };
         assert!(matches!(
-            err.downcast_ref::<BuildError>(),
-            Some(BuildError::InvalidAttributes(
-                ValidateAttributesError::InvalidKey(ValidateNameError::TooShort)
-            ))
+            err,
+            BuildError::InvalidAttributes {
+                source: ValidateAttributesError::InvalidKey {
+                    source: ValidateNameError::TooShort { .. },
+                    ..
+                },
+                ..
+            }
         ));
 
         // more than 128 entries errors
@@ -1650,10 +1715,11 @@ mod tests {
             panic!("attributes should fail for more than 128 entries");
         };
         assert!(matches!(
-            err.downcast_ref::<BuildError>(),
-            Some(BuildError::InvalidAttributes(
-                ValidateAttributesError::TooManyEntries
-            ))
+            err,
+            BuildError::InvalidAttributes {
+                source: ValidateAttributesError::TooManyEntries { .. },
+                ..
+            }
         ));
     }
 
@@ -1671,7 +1737,6 @@ mod tests {
         Client::builder(&endpoint)
             .disable_metrics_interval()
             .api_secret(api_secret)
-            .unwrap()
             .build()
             .await
             .unwrap()
@@ -1689,7 +1754,10 @@ mod tests {
             .expect_err("too-short group should fail validation");
         assert!(matches!(
             err,
-            Error::InvalidGroup(ValidateNameError::TooShort)
+            Error::InvalidGroup {
+                source: ValidateNameError::TooShort { .. },
+                ..
+            }
         ));
 
         let too_long = "x".repeat(CLIENT_NAME_MAX_LENGTH + 1);
@@ -1699,7 +1767,10 @@ mod tests {
             .expect_err("too-long group should fail validation");
         assert!(matches!(
             err,
-            Error::InvalidGroup(ValidateNameError::TooLong)
+            Error::InvalidGroup {
+                source: ValidateNameError::TooLong { .. },
+                ..
+            }
         ));
     }
 
@@ -1716,9 +1787,13 @@ mod tests {
             .expect_err("too-short attribute key should fail validation");
         assert!(matches!(
             err,
-            Error::InvalidAttributes(ValidateAttributesError::InvalidKey(
-                ValidateNameError::TooShort
-            ))
+            Error::InvalidAttributes {
+                source: ValidateAttributesError::InvalidKey {
+                    source: ValidateNameError::TooShort { .. },
+                    ..
+                },
+                ..
+            }
         ));
 
         // value over the max length
@@ -1729,7 +1804,10 @@ mod tests {
             .expect_err("too-long attribute value should fail validation");
         assert!(matches!(
             err,
-            Error::InvalidAttributes(ValidateAttributesError::ValueTooLong)
+            Error::InvalidAttributes {
+                source: ValidateAttributesError::ValueTooLong { .. },
+                ..
+            }
         ));
 
         // more entries than allowed
@@ -1742,7 +1820,10 @@ mod tests {
             .expect_err("too many attributes should fail validation");
         assert!(matches!(
             err,
-            Error::InvalidAttributes(ValidateAttributesError::TooManyEntries)
+            Error::InvalidAttributes {
+                source: ValidateAttributesError::TooManyEntries { .. },
+                ..
+            }
         ));
     }
 
@@ -1757,9 +1838,13 @@ mod tests {
             .expect_err("too-short attribute key should fail validation");
         assert!(matches!(
             err,
-            Error::InvalidAttributes(ValidateAttributesError::InvalidKey(
-                ValidateNameError::TooShort
-            ))
+            Error::InvalidAttributes {
+                source: ValidateAttributesError::InvalidKey {
+                    source: ValidateNameError::TooShort { .. },
+                    ..
+                },
+                ..
+            }
         ));
 
         // A valid single attribute passes validation, then reaches the dial
@@ -1769,7 +1854,7 @@ mod tests {
             .set_attribute("firmware", "2.1.0")
             .await
             .expect_err("no server: remote call must fail after validation passes");
-        assert!(matches!(err, Error::Connect(_)), "got {err:?}");
+        assert!(matches!(err, Error::Connect { .. }), "got {err:?}");
     }
 
     #[tokio::test]
@@ -1789,7 +1874,6 @@ mod tests {
             .attributes(full)
             .unwrap()
             .api_secret(api_secret)
-            .unwrap()
             .build()
             .await
             .unwrap();
@@ -1804,7 +1888,10 @@ mod tests {
         assert!(
             matches!(
                 err,
-                Error::InvalidAttributes(ValidateAttributesError::TooManyEntries)
+                Error::InvalidAttributes {
+                    source: ValidateAttributesError::TooManyEntries { .. },
+                    ..
+                }
             ),
             "expected TooManyEntries, got {err:?}"
         );
@@ -1825,7 +1912,7 @@ mod tests {
             .await
             .expect_err("no server: remote call must fail after validation passes");
         assert!(
-            matches!(err, Error::Connect(_)),
+            matches!(err, Error::Connect { .. }),
             "expected a connect error (validation accepted), got {err:?}"
         );
 
@@ -1838,7 +1925,7 @@ mod tests {
             .await
             .expect_err("no server: remote call must fail after validation passes");
         assert!(
-            matches!(err, Error::Connect(_)),
+            matches!(err, Error::Connect { .. }),
             "expected a connect error (validation accepted), got {err:?}"
         );
     }

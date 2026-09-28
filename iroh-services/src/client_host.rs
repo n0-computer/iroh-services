@@ -1,4 +1,3 @@
-use anyhow::{Result, ensure};
 use iroh::{
     Endpoint, EndpointId,
     endpoint::Connection,
@@ -10,7 +9,7 @@ use iroh_services_proto::{
 };
 use irpc::WithChannels;
 use irpc_iroh::read_request;
-use n0_error::AnyError;
+use n0_error::{AnyError, bail_any, ensure, stack_error};
 use rcan::{Capability, CapabilityOrigin, Rcan};
 use tracing::{debug, warn};
 
@@ -22,10 +21,9 @@ pub struct ClientHost {
 
 impl ProtocolHandler for ClientHost {
     async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
-        self.handle_connection(connection).await.map_err(|e| {
-            let boxed: Box<dyn std::error::Error + Send + Sync> = e.into();
-            AcceptError::from(AnyError::from(boxed))
-        })
+        self.handle_connection(connection)
+            .await
+            .map_err(AcceptError::from)
     }
 }
 
@@ -36,7 +34,7 @@ impl ClientHost {
         }
     }
 
-    async fn handle_connection(&self, connection: Connection) -> Result<()> {
+    async fn handle_connection(&self, connection: Connection) -> Result<(), AnyError> {
         let remote_node_id = connection.remote_id();
         let Some(first_request) = read_request::<ClientHostProtocol>(&connection).await? else {
             return Ok(());
@@ -68,17 +66,17 @@ impl ClientHost {
         match request {
             NetDiagnosticsMessage::Auth(_) => {
                 connection.close(400u32.into(), b"Unexpected auth message");
-                anyhow::bail!("unexpected auth message");
+                bail_any!("unexpected auth message");
             }
             NetDiagnosticsMessage::RunNetworkDiagnostics(msg) => {
                 let WithChannels { tx, .. } = msg;
                 let needed_caps = Caps::new([NetDiagnosticsCap::GetAny]);
                 if !capability.permits(&needed_caps) {
-                    return send_missing_caps(tx, needed_caps).await;
+                    send_missing_caps(tx, needed_caps).await?;
+                    return Ok(());
                 }
 
-                let report =
-                    crate::net_diagnostics::checks::run_diagnostics(&self.endpoint).await?;
+                let report = crate::net_diagnostics::checks::run_diagnostics(&self.endpoint).await;
                 tx.send(Ok(report.into_proto()))
                     .await
                     .inspect_err(|e| warn!("sending network diagnostics response: {:?}", e))?;
@@ -90,11 +88,24 @@ impl ClientHost {
     }
 }
 
-fn verify_rcan(endpoint: &Endpoint, remote_node: EndpointId, rcan: &Rcan<Caps>) -> Result<()> {
+/// Why a presented rcan is not a grant this endpoint issued to the remote.
+#[stack_error(derive, add_meta)]
+#[error("invalid grant: {reason}")]
+struct InvalidGrant {
+    reason: &'static str,
+}
+
+fn verify_rcan(
+    endpoint: &Endpoint,
+    remote_node: EndpointId,
+    rcan: &Rcan<Caps>,
+) -> Result<(), InvalidGrant> {
     // Must be a first-party token (not delegated)
     ensure!(
         matches!(rcan.capability_origin(), CapabilityOrigin::Issuer),
-        "invalid capability origin: expected first-party token"
+        InvalidGrant {
+            reason: "expected a first-party token"
+        }
     );
 
     // Issuer must be this endpoint (we issued this grant)
@@ -102,7 +113,9 @@ fn verify_rcan(endpoint: &Endpoint, remote_node: EndpointId, rcan: &Rcan<Caps>) 
         EndpointId::try_from(rcan.issuer().as_bytes())
             .map(|id| id == endpoint.id())
             .unwrap_or(false),
-        "invalid issuer: RCAN was not issued by this endpoint"
+        InvalidGrant {
+            reason: "not issued by this endpoint"
+        }
     );
 
     // Audience must be the remote node (the token is for them)
@@ -110,7 +123,9 @@ fn verify_rcan(endpoint: &Endpoint, remote_node: EndpointId, rcan: &Rcan<Caps>) 
         EndpointId::try_from(rcan.audience().as_bytes())
             .map(|id| id == remote_node)
             .unwrap_or(false),
-        "invalid audience: RCAN audience does not match remote node"
+        InvalidGrant {
+            reason: "audience does not match the remote endpoint"
+        }
     );
 
     Ok(())
@@ -119,7 +134,7 @@ fn verify_rcan(endpoint: &Endpoint, remote_node: EndpointId, rcan: &Rcan<Caps>) 
 async fn send_missing_caps<T>(
     tx: irpc::channel::oneshot::Sender<Result<T, RemoteError>>,
     missing_caps: Caps,
-) -> Result<()> {
+) -> Result<(), irpc::channel::SendError> {
     tx.send(Err(RemoteError::MissingCapability(missing_caps)))
         .await?;
     Ok(())
@@ -161,7 +176,6 @@ mod tests {
             Duration::from_secs(3600),
             crate::caps::Caps::client(),
         )
-        .unwrap()
         .into_rcan();
 
         // Connect on the net diagnostics ALPN
@@ -211,7 +225,6 @@ mod tests {
             Duration::from_secs(3600),
             crate::caps::Caps::client(),
         )
-        .unwrap()
         .into_rcan();
 
         let conn =
