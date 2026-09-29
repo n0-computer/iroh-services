@@ -15,7 +15,7 @@ data-encoding = "2.9.0"
 ed25519-dalek = { version = ">=3.0.0-rc.0,<4.0.0", features = ["serde", "rand_core", "zeroize", "pkcs8", "pem"] }
 irpc = { version = "0.17", default-features = false, features = ["derive", "stream", "spans"] }
 irpc-iroh = "0.17"
-iroh = { version = "1.0.0", default-features = false, features = ["unstable-net-report"] }
+iroh = { version = "1.3.0", default-features = false, features = ["unstable-net-report"] }
 iroh-metrics = { version = "1.0.0", default-features = false }
 iroh-services-proto = { version = "0.1.0", path = "../iroh-services-proto" }
 iroh-tickets = "1.0.0"
