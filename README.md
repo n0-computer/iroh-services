@@ -23,8 +23,21 @@ let endpoint = Endpoint::bind(presets::N0).await?;
 let client = Client::builder(&endpoint)
     .api_secret_from_env()?
     .name("my-endpoint")?
+    .group("dev")?
+    .attributes([
+        ("version", "2.0.0-rc"),
+    ])?
     .build()
     .await?;
+
+```
+
+### Attributes
+
+```
+// Update metadata as your application changes.
+client.set_attribute("version", "2.0.1").await?;
+client.set_group("canary").await?;
 ```
 
 See the [`quickstart`](iroh-services/examples/quickstart.rs) example for a runnable version,
