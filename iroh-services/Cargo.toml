@@ -40,7 +40,7 @@ rand = "0.10.1"
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 base64 = "0.22"
-portmapper = "0.19"
+portmapper = "0.20"
 
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }

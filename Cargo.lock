@@ -345,8 +345,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1355,14 +1357,14 @@ dependencies = [
  "n0-error",
  "n0-future",
  "n0-watcher",
- "netwatch",
+ "netwatch 0.19.3",
  "noq",
  "noq-proto",
  "noq-udp",
  "papaya",
  "pin-project",
  "portable-atomic",
- "portmapper",
+ "portmapper 0.19.3",
  "rand",
  "reqwest",
  "rustc-hash",
@@ -1514,7 +1516,7 @@ dependencies = [
  "irpc-iroh",
  "n0-error",
  "n0-future",
- "portmapper",
+ "portmapper 0.20.0",
  "postcard",
  "rand",
  "rcan",
@@ -2008,6 +2010,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "netlink-proto"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97e03ae6247c6cdb499e8f14e98c72b83954d85822b687056e3a21150b438f2b"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "log",
+ "netlink-packet-core 0.9.0",
+ "netlink-sys 0.9.0",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "netlink-sys"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2027,8 +2044,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c99d38e00b420df49e940fe0826e667c3dad82ac68eb4c2bbf754c1c14a83a10"
 dependencies = [
  "bytes",
+ "futures-util",
  "libc",
  "log",
+ "tokio",
 ]
 
 [[package]]
@@ -2051,8 +2070,46 @@ dependencies = [
  "netdev 0.46.3",
  "netlink-packet-core 0.8.2",
  "netlink-packet-route 0.31.0",
- "netlink-proto",
+ "netlink-proto 0.12.2",
  "netlink-sys 0.8.8",
+ "noq-udp",
+ "objc2-core-foundation",
+ "objc2-system-configuration",
+ "pin-project-lite",
+ "serde",
+ "socket2",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "web-sys",
+ "windows",
+ "windows-result",
+ "wmi",
+]
+
+[[package]]
+name = "netwatch"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c3a0623d1a02e08a6f86fb9481811578271d61f7395f7f0701775be64788b2c"
+dependencies = [
+ "atomic-waker",
+ "bytes",
+ "cfg_aliases",
+ "chrono",
+ "derive_more",
+ "ipnet",
+ "js-sys",
+ "libc",
+ "n0-error",
+ "n0-future",
+ "n0-watcher",
+ "netdev 0.46.3",
+ "netlink-packet-core 0.9.0",
+ "netlink-packet-route 0.33.0",
+ "netlink-proto 0.13.0",
+ "netlink-sys 0.9.0",
  "noq-udp",
  "objc2-core-foundation",
  "objc2-system-configuration",
@@ -2472,7 +2529,36 @@ dependencies = [
  "libc",
  "n0-error",
  "n0-future",
- "netwatch",
+ "netwatch 0.19.3",
+ "num_enum",
+ "rand",
+ "serde",
+ "smallvec",
+ "socket2",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tower-layer",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "portmapper"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bad81f18ea1635a873d8cbb62904d7752f0b82001dae5cc3a774c82b0b208cf7"
+dependencies = [
+ "base64 0.23.1",
+ "bytes",
+ "derive_more",
+ "hyper-util",
+ "igd-next",
+ "iroh-metrics",
+ "libc",
+ "n0-error",
+ "n0-future",
+ "netwatch 0.20.0",
  "num_enum",
  "rand",
  "serde",
